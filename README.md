@@ -33,17 +33,21 @@ e:\MedGemma
 │   │   ├── app.py            # FastAPI 主入口文件 
 │   │   ├── model_engine.py   # 模型加载与推理引擎 
 │   │   ├── context_manager.py# 上下文长度管理器 
-│   │   ├── config_loader.py  # 配置加载器
-│   │   └── requirements.txt  # 后端依赖列表
-│   ├── frontend/             # 前端静态资源 (HTML/CSS/JS)
+│   │   └── ...
+│   ├── frontend/             # 前端静态资源
+│   │   ├── index.html        # 主界面
+│   │   └── js/               # ES Modules 模块化源码
+│   │       ├── main.js       # 入口
+│   │       ├── store.js      # 状态管理
+│   │       └── api/          # API 请求逻辑
 │   ├── medgemma-1.5-4b-it/   # 本地模型权重文件夹 (可离线加载)
 │   ├── 环境脚本/             # 环境配置辅助脚本 (如 GPU 修复)
-│   ├── run_local.bat         # 一键启动脚本
-│   └── package.py            # 打包/部署工具
+│   └── run_local.bat         # 一键启动脚本
 ├── requirements.txt          # 项目统一依赖文件
 ├── README.md                 # 项目说明文档 (本文档)
 ├── ISSUES_SOLUTIONS.md       # 常见问题与解决方案汇总
-└── FEATURES.md               # 已完成功能列表
+├── FEATURES.md               # 已完成功能列表
+└── EXPLORATION_JOURNEY.md    # 项目探索历程与技术决策记录
 ```
 
 ## 3. 环境配置与安装 (Installation)
@@ -98,7 +102,7 @@ e:\MedGemma
 
 ## 5. 未来计划 (Future Roadmap)
 
-为了进一步提升系统的实用性与用户体验，我们计划在后续版本中实现以下功能：
+我们计划在后续版本中实现以下功能：
 
 1.  **集成 YOLO 病灶检测 (YOLO Lesion Detection):**
     *   引入 YOLO 系列模型（如 YOLOv8/v11）进行专门的医学影像病灶识别与定位。
@@ -118,3 +122,4 @@ e:\MedGemma
 
 *   [常见问题与解决方案 (ISSUES_SOLUTIONS.md)](./ISSUES_SOLUTIONS.md)
 *   [功能列表 (FEATURES.md)](./FEATURES.md)
+*   [提示词工程指南 (PROMPT_GUIDE.md)](./PROMPT_GUIDE.md) - **新增**: 包含谷歌官方推荐的各类医疗任务专用 Prompt 模板。

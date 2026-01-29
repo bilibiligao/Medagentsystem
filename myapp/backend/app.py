@@ -10,7 +10,9 @@ from contextlib import asynccontextmanager
 from model_engine import engine
 from config_loader import LOGGER
 from context_manager import context_manager 
+from detection_service import DetectionService # Import new service
 import uvicorn
+import json
 
 # Request Models
 # Request Models (请求数据模型)
@@ -36,8 +38,13 @@ class ChatRequest(BaseModel):
 
 # App Lifecycle
 # App Lifecycle (应用生命周期)
+detection_service = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global detection_service
+    detection_service = DetectionService(engine)
+    
     # Load model on startup (optional, can be lazy)
     # Load model on startup (optional, can be lazy) (启动时加载模型（可选，也可懒加载）)
     # engine.load_model()
@@ -63,6 +70,42 @@ async def get_status():
     return {"status": "running", "model_loaded": engine.model is not None}
 
 from fastapi.responses import StreamingResponse
+
+
+class DetectRequest(BaseModel):
+    messages: List[Message]
+    config: Optional[Config] = None
+
+@app.post("/api/detect")
+async def detect(request: DetectRequest):
+    try:
+        # Convert Pydantic to dict
+        messages_data = [msg.model_dump() for msg in request.messages]
+        
+        # Call specialized detection service
+        # Pass system prompt from config if available
+        custom_system_prompt = request.config.system_prompt if request.config and request.config.system_prompt else None
+        
+        result = detection_service.detect_findings(messages_data, custom_system_prompt=custom_system_prompt)
+        
+        # Try to parse JSON here for safety
+        import json
+        findings_data = []
+        try:
+             findings_data = json.loads(result["findings"])
+        except json.JSONDecodeError:
+             LOGGER.warning(f"Failed to parse detection JSON. Raw: {result['findings']}")
+             # Robustness: Try to fix common JSON errors or return raw text
+             findings_data = {"error": "JSON Parse Error", "raw": result["findings"]}
+             
+        return {
+             "status": "success",
+             "thought": result["thought_trace"],
+             "findings": findings_data
+        }
+    except Exception as e:
+        LOGGER.error(f"Error during detection: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/chat")
 async def chat(request: ChatRequest, raw_request: Request):

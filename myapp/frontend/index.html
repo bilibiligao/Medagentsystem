@@ -146,6 +146,14 @@
                                         <div v-if="item.type === 'text'" v-html="renderMarkdown(item.text)"></div>
                                     </template>
                                 </div>
+
+                                <!-- Restore Detection View Button (For Detection Results) -->
+                                <div v-if="msg.isDetectionResult" class="mt-2 pt-2 border-t border-gray-700/50">
+                                    <button @click="restoreDetectionView(msg)" class="text-xs bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border border-blue-500/30 px-3 py-1.5 rounded flex items-center gap-2 transition-colors w-full justify-center sm:w-auto">
+                                        <i class="fa-solid fa-eye"></i> 
+                                        <span>查看病灶标注图</span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -256,7 +264,26 @@
                            <p class="text-xs text-gray-500">控制发送给模型的历史记录长度。数值越大，模型能记住的对话越多，但速度越慢且占用显存。</p>
                         </div>
 
-                        <div class="space-y-2">
+                        <!-- Detection Settings Collapsible -->
+                        <div class="border-t border-gray-700 pt-4 mt-4">
+                            <details class="group">
+                                <summary class="flex justify-between items-center cursor-pointer list-none text-sm font-medium text-gray-300 hover:text-white transition">
+                                    <span>病灶标注设置</span>
+                                    <span class="transition group-open:rotate-180">
+                                        <i class="fa-solid fa-chevron-down text-xs"></i>
+                                    </span>
+                                </summary>
+                                <div class="mt-4 space-y-3 animate-fadeIn">
+                                    <div class="space-y-1">
+                                        <label class="text-xs text-gray-400">检测提示词 (System Prompt)</label>
+                                        <textarea v-model="settings.detectionPrompt" rows="6" class="w-full bg-gray-900/50 border border-gray-600 rounded p-2 text-xs font-mono focus:border-blue-500 focus:outline-none h-32"></textarea>
+                                        <p class="text-[10px] text-gray-500">修改此提示词可调整模型检测行为。刷新页面恢复默认。</p>
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
+                        
+                        <div class="space-y-2 pt-2">
                            <label class="text-sm font-medium text-gray-300">API 地址</label>
                            <input type="text" v-model="settings.apiEndpoint" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-sm focus:border-blue-500 focus:outline-none">
                         </div>
@@ -284,24 +311,75 @@
 
         <!-- Floating Active Image (Bottom Right) -->
         <transition name="slide-up">
-            <div v-if="activeFloatingImage" class="fixed bottom-24 right-6 w-56 z-30 bg-gray-800/90 border border-gray-600 rounded-xl shadow-2xl p-2 transition-all duration-300 hover:w-96 backdrop-blur-md group">
-                <div class="relative">
-                     <!-- Drag handle / Title could go here -->
-                    <div class="absolute -top-3 left-2 bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-full shadow-sm">
+            <div v-if="activeFloatingImage" class="fixed bottom-24 right-6 w-64 z-30 bg-gray-800/90 border border-gray-600 rounded-xl shadow-2xl p-2 transition-all duration-300 hover:w-[500px] backdrop-blur-md group">
+                <div class="relative w-full h-full">
+                     <!-- Title -->
+                    <div class="absolute -top-3 left-2 bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-full shadow-sm z-50">
                         当前参考影像
                     </div>
-                    <img :src="activeFloatingImage" class="w-full h-auto rounded-lg border border-gray-500/50 cursor-zoom-in" @click="previewImage(activeFloatingImage)">
                     
-                    <button @click="activeFloatingImage = null" class="absolute -top-2 -right-2 bg-gray-700 text-gray-300 border border-gray-500 hover:bg-red-500 hover:text-white rounded-full w-6 h-6 flex items-center justify-center shadow-lg transition z-40">
+                    <!-- Image Container -->
+                    <div class="relative w-full">
+                        <img :src="activeFloatingImage" class="w-full h-auto rounded-lg border border-gray-500/50 cursor-zoom-in" @click="previewImage(activeFloatingImage)">
+                        
+                        <!-- SVG Overlay for Bounding Boxes -->
+                        <svg v-if="currentFindings.length > 0" class="absolute inset-0 w-full h-full pointer-events-none rounded-lg" viewBox="0 0 1000 1000" preserveAspectRatio="none">
+                            <g v-for="(finding, idx) in currentFindings" :key="idx">
+                                <rect 
+                                    :x="finding.box_2d[1]" 
+                                    :y="finding.box_2d[0]" 
+                                    :width="Math.max(1, finding.box_2d[3] - finding.box_2d[1])" 
+                                    :height="Math.max(1, finding.box_2d[2] - finding.box_2d[0])" 
+                                    fill="none" 
+                                    stroke="#ef4444" 
+                                    stroke-width="1"
+                                    vector-effect="non-scaling-stroke"
+                                />
+                                <!-- Label Background -->
+                                <rect 
+                                    :x="finding.box_2d[1]" 
+                                    :y="Math.max(0, finding.box_2d[0] - 8)" 
+                                    width="20" height="8" 
+                                    fill="#ef4444" 
+                                    opacity="0.8"
+                                />
+                                <!-- Label Text -->
+                                <text 
+                                    :x="finding.box_2d[1] + 1" 
+                                    :y="Math.max(6, finding.box_2d[0] - 2)" 
+                                    fill="white" 
+                                    font-size="4"
+                                    font-weight="bold"
+                                    style="text-shadow: 1px 1px 1px rgba(0,0,0,0.5);"
+                                >{{ idx + 1 }}</text>
+                            </g>
+                        </svg>
+                    </div>
+                    
+                    <button @click="activeFloatingImage = null" class="absolute -top-2 -right-2 bg-gray-700 text-gray-300 border border-gray-500 hover:bg-red-500 hover:text-white rounded-full w-6 h-6 flex items-center justify-center shadow-lg transition z-50">
                          <i class="fa-solid fa-times text-xs"></i>
                     </button>
                     
-                    <!-- Placeholder for future annotation controls -->
-                    <div class="mt-2 hidden group-hover:block transition-all">
-                         <div class="flex justify-center gap-2">
-                             <button class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-gray-300" title="暂未开放">
-                                <i class="fa-solid fa-draw-polygon mr-1"></i> 标注病灶
+                    <!-- Controls & Findings List -->
+                    <div class="mt-2 transition-all">
+                         <div class="flex justify-between items-center mb-2">
+                             <button @click="detectLesions" :disabled="isDetecting" class="text-xs bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 px-3 py-1.5 rounded text-white shadow-sm flex items-center gap-2">
+                                <i v-if="isDetecting" class="fa-solid fa-spinner fa-spin"></i>
+                                <i v-else class="fa-solid fa-draw-polygon"></i>
+                                {{ isDetecting ? 'AI 分析中...' : '标注病灶 (Beta)' }}
                              </button>
+                             <span v-if="currentFindings.length > 0" class="text-[10px] text-green-400">发现 {{ currentFindings.length }} 处异常</span>
+                         </div>
+                         
+                         <!-- Findings Details Panel (Visible when expand) -->
+                         <div v-if="currentFindings.length > 0" class="max-h-32 overflow-y-auto space-y-2 hidden group-hover:block border-t border-gray-700 pt-2">
+                             <div v-for="(finding, idx) in currentFindings" :key="idx" class="text-xs bg-gray-800/50 p-2 rounded border border-gray-700 hover:border-red-500 transition">
+                                 <div class="font-bold text-red-400 flex items-center gap-2">
+                                     <span class="bg-red-500 text-white w-4 h-4 rounded-full flex items-center justify-center text-[10px]">{{ idx + 1 }}</span>
+                                     {{ finding.label }}
+                                 </div>
+                                 <div class="text-gray-400 mt-1 leading-tight">{{ finding.description }}</div>
+                             </div>
                          </div>
                     </div>
                 </div>

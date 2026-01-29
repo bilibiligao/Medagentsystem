@@ -53,35 +53,36 @@
 ## 3. 前端功能 (Frontend Features)
 
 ### 3.1 核心交互引擎 (Core Interaction Engine)
-*   **对应文件:** `myapp/frontend/js/app.js`
-*   **流式响应处理 (Streaming Response):** `processResponse` 函数利用 `Fetch API` 的 `ReadableStream` (`response.body.getReader()`) 实现打字机效果。不仅提升用户体验，还能在长文本生成时提供即时反馈。
-*   **请求中断控制 (Abort Control):** 集成 `AbortController`，支持用户随时点击 "停止生成" 并优雅终止 HTTP 请求。
-*   **消息重生成 (Regenerate):** `regenerate` 函数逻辑智能判断：若最后一条消息为 AI 回复则移除重发；若为用户消息则直接重发。
+*   **架构:** ES Modules 模块化设计 (单体 `app.js` 已弃用)。
+*   **对应文件:** 
+    - `myapp/frontend/js/main.js`: 引导与挂载。
+    - `myapp/frontend/js/api/chat.js`: 负责对话逻辑。
+*   **功能:**
+    *   **流式响应 (SSE):** 手动解析 `Fetch API` 的 `ReadableStream`，支持 OpenAI 格式的 Delta Update。
+    *   **异常处理:** 自动过滤 `data: [DONE]` 等非标准 JSON 帧。
+    *   **消息重生成 (Regenerate):** 智能判断重试逻辑，支持移除最后一条错误回复并重试。
 
-### 3.2 高级 Markdown 与思维链渲染 (Advanced Rendering)
-*   **对应文件:** `myapp/frontend/js/app.js` -> `renderMarkdown`
-*   **思维链可视化 (CoT Visualization):** 专门针对 DeepSeek/Gemma 等模型的思维链特性设计。
-    *   自动识别并提取 `<think>` 或 `<unused94>` 标签包裹的内容。
-    *   将思维过程渲染为可折叠的 `<details>` 组件，配以 "大脑" 图标和暗色背景，区分 "思考" 与 "回答"。
-*   **格式清洗:** 自动过滤 `</s>`, `<eos>` 等系统特殊 Token，保持输出纯净。
+### 3.2 病灶检测与分析 (Lesion Detection)
+*   **对应文件:** `myapp/frontend/js/api/detection.js`
+*   **功能:**
+    *   **上下文隔离:** 使用独立的 Session 和 System Prompt 发起检测请求，不干扰主对话历史。
+    *   **Prompt 适配:** 内置针对 Gemma 模型的中文 Prompt，强制输出 Simplified Chinese 和 0-1000 相对坐标 JSON。
+    *   **坐标归一化:** 自动验证并清洗后端返回的 Bounding Box 数据。
 
-### 3.3 图像处理与交互 (Image Processing)
-*   **对应文件:** `myapp/frontend/js/app.js`
-*   **本地预览与编码:** `handleImageUpload` 使用 `FileReader` 将上传图片转换为 Base64 Data URL，实现无服务端的即时预览。
-*   **沉浸式查看:** `activeFloatingImage` 状态控制全屏/悬浮灯箱模式，允许医生放大查看 X 光片或病理切片的细节。
+### 3.3 高级渲染与可视化 (Advanced Rendering)
+*   **对应文件:** `myapp/frontend/js/components/renderer.js`
+*   **功能:**
+    *   **Markdown & CoT:** 自动识别并折叠 `<think>` 标签，渲染推理过程。
+    *   **SVG 标注:** 在 `index.html` 中通过 SVG 覆盖层绘制病灶框，利用 `viewBox="0 0 1000 1000"` 完美映射模型坐标，无需前端计算百分比。
 
-### 3.4 会话状态管理 (Session State Management)
-*   **对应文件:** `myapp/frontend/js/app.js`
-*   **即时持久化:** 利用 `watch` 监听器实现深度监听 (Deep Watch)，任何消息变动都会触发 `localStorage` 更新。
-*   **元数据管理:** 维护 `medgemma_sessions` 索引列表，记录最后修改时间与自动生成的标题（基于首条用户消息截取）。
+### 3.4 状态管理 (State Management)
+*   **对应文件:** `myapp/frontend/js/store.js`
+*   **功能:**
+    *   **Store 模式:** 集中管理 `messages`, `settings`, `sessions` 等响应式状态。
+    *   **持久化:** 自动同步会话列表至 `localStorage`。
 
-### 3.5 消息编辑 (Message Editing)
-*   **对应文件:** `myapp/frontend/js/app.js`
-*   **原地编辑:** 支持 `startEdit` / `saveEdit` 流程，允许用户修改历史提问并重新触发对话上下文更新。
-
-### 3.6 界面渲染
-*   **对应文件:** `myapp/frontend/index.html`
-*   **核心功能:**
-    *   基于 Tailwind CSS 的响应式暗色主题 (Dark Mode) 设计。
-    *   移动端适配 (侧边栏抽屉式交互)。
+### 3.5 图像交互 (Image Interaction)
+*   **功能:**
+    *   **悬浮窗 (Floating Window):** 即使在长对话中也能通过右下角悬浮窗随时查看当前“关注”的影像。
+    *   **交互式标注:** 点击检测结果可高亮对应区域。
 

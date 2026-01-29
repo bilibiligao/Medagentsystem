@@ -51,3 +51,29 @@ MedGemma 4B 模型全精度加载可能需要约 8GB+ 显存。
 **解决方案 (Solution):**
 - **CORS 配置:** 后端 `app.py` 已经配置了 `CORSMiddleware` 允许跨域请求 (`allow_origins=["*"]`)。
 - **端口检查:** 确保后端服务运行在正确端口（默认 8000），前端请求地址匹配。
+
+## 6. 病灶检测 (Lesion Detection)
+
+### [Issue] 检测框极小或位置严重偏移
+*   **现象**: SVG 渲染出的红框挤在图片左上角，或完全不对应病灶位置。
+*   **原因**: **坐标系不匹配**。
+    - 模型训练数据使用的是 **0-1000** 的整数坐标系。
+    - 前端误以为是 0-100 或 0-1 坐标系进行渲染。
+*   **解决方案**: 
+    - **后端**: 确保 Prompt 请求 "Integers 0-1000"。
+    - **前端**: 将 SVG 容器的 `viewBox` 设置为 `"0 0 1000 1000"`，从而让 SVG 自动处理缩放，无需手动计算百分比。
+
+### [Issue] 模型输出英文标签 (Language Mismatch)
+*   **现象**: 哪怕用户用中文提问，Detection JSON 中的 `label` 依然是 "Lung Opacity"。
+*   **原因**: 模型的微调数据主要为英文，其内部对医学术语的表示倾向于英文。
+*   **解决方案**: 在 System Prompt 中添加强约束规则："All labels and descriptions MUST be in Simplified Chinese (简体中文)." 并且在 Few-Shot 示例中直接提供中文样本。
+
+## 7. 前端架构 (Frontend Architecture)
+
+### [Issue] 代码维护困难 (Monolithic Codebase)
+*   **现象**: 添加新功能（如设置面板）时，容易破坏原有的对话逻辑；文件过长需要反复滚动。
+*   **原因**: 单体脚本模式 (Monolithic Script) 导致关注点未分离。
+*   **解决方案**: **2026-01-30 完成重构 (ES Modules)**。
+    - 建立 `store.js` 管理全局状态。
+    - 拆分 `api/` 和 `components/` 目录。
+    - 在 `index.html` 中使用 `<script type="module" src="js/main.js"></script>`。
