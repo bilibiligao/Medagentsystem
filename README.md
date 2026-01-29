@@ -96,7 +96,25 @@ e:\MedGemma
 *   **`model_engine.py`**: 封装了 `load_model` 逻辑，处理模型路径自动探测（优先本地 `myapp/medgemma-1.5-4b-it`，其次 HuggingFace Hub）及 GPU 量化加载。
 *   **`context_manager.py`**: 实现了智能的消息修剪策略，优先保护图像数据的完整性。
 
-## 5. 更多文档 (More Documentation)
+## 5. 未来计划 (Future Roadmap)
+
+为了进一步提升系统的实用性与用户体验，我们计划在后续版本中实现以下功能：
+
+1.  **集成 YOLO 病灶检测 (YOLO Lesion Detection):**
+    *   引入 YOLO 系列模型（如 YOLOv8/v11）进行专门的医学影像病灶识别与定位。
+    *   在进入 LLM 对话前，先对图像进行检测，并将检测结果（如病灶位置、类型置信度）作为额外的提示词信息提供给 MedGemma，提高诊断准确率。
+
+2.  **数据库与用户系统 (Database & User System):**
+    *   引入 SQLite/PostgreSQL 数据库。
+    *   实现**用户管理**：注册、登录、鉴权。
+    *   **数据持久化**：云端（或本地数据库）保存用户的聊天历史和上传的医学影像，支持多设备同步。
+
+3.  **前端交互升级 (Frontend & UI/UX):**
+    *   开发独立的用户登录界面。
+    *   美化现有聊天界面，增加深色/浅色主题切换。
+    *   优化移动端适配与交互流畅度。
+
+## 6. 更多文档 (More Documentation)
 
 *   [常见问题与解决方案 (ISSUES_SOLUTIONS.md)](./ISSUES_SOLUTIONS.md)
 *   [功能列表 (FEATURES.md)](./FEATURES.md)

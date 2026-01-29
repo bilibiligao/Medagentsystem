@@ -19,11 +19,11 @@ createApp({
         const editText = ref("");
 
         const defaultSettings = {
-            systemPrompt: "You are MedGemma, a senior AI radiologist and medical consultant.\n\n**Instructions:**\n1. **Image Analysis**: If an image is provided, provide a structured report:\n   - **Findings**: Detailed description of anatomy, textures, and abnormalities.\n   - **Impression**: The likely diagnosis.\n   - **Reasoning**: Explain specific visual evidence.\n\n2. **Medical Consultation**: If NO image is provided, answer medical questions utilizing your professional knowledge. Be accurate, helpful, and evidence-based.\n\n3. **General**: Be concise and professional.",
+            systemPrompt: "SYSTEM INSTRUCTION: think silently if needed.\n\nYou are MedGemma, a senior AI radiologist and medical consultant.\n\n**Instructions:**\n1. **Image Analysis**: If an image is provided, provide a structured report:\n   - **Findings**: Detailed description of anatomy, textures, and abnormalities.\n   - **Impression**: The likely diagnosis.\n   - **Reasoning**: Explain specific visual evidence.\n\n2. **Medical Consultation**: If NO image is provided, answer medical questions utilizing your professional knowledge. Be accurate, helpful, and evidence-based.\n\n3. **General**: Be concise and professional.",
             temperature: 0.7,
             topP: 0.9,
-            maxTokens: 1024,
-            contextWindow: 8192,
+            maxTokens: 4096,
+            contextWindow: 20000,
             apiEndpoint: window.location.origin + "/api/chat"
         };
 
@@ -319,7 +319,8 @@ createApp({
                         top_p: settings.topP,
                         max_tokens: settings.maxTokens,
                         context_window: settings.contextWindow
-                    }
+                    },
+                    session_id: currentSessionId.value // Send session ID for backend sync
                 };
 
                 const response = await fetch(settings.apiEndpoint, {

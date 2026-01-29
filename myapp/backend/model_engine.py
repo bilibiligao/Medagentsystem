@@ -69,6 +69,7 @@ class MedGemmaEngine:
         model_kwargs = dict(
             torch_dtype=compute_dtype,
             device_map=device_map,
+            attn_implementation="sdpa", # Use Flash Attention 2 compatible implementation if available
         )
 
         if self.use_quantization:
@@ -89,10 +90,14 @@ class MedGemmaEngine:
                 self.use_quantization = False
 
         try:
-            self.processor = AutoProcessor.from_pretrained(self.model_id)
+            self.processor = AutoProcessor.from_pretrained(self.model_id, use_fast=False)
             self.model = AutoModelForImageTextToText.from_pretrained(self.model_id, **model_kwargs)
             LOGGER.info("Model loaded successfully.")
             
+            # CLEAR CACHE to free up 'Reserved' memory that isn't 'Allocated'
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
             # --- VRAM Usage Check ---
             if torch.cuda.is_available():
                 allocated = torch.cuda.memory_allocated() / (1024**3)

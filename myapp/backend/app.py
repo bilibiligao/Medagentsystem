@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Union, Optional, Any
 import os
+import time
 import logging
 from contextlib import asynccontextmanager
 from model_engine import engine
@@ -88,6 +89,9 @@ async def chat(request: ChatRequest, raw_request: Request):
 
         async def event_generator():
             full_response = ""
+            start_time = time.time()
+            first_token_time = None
+            
             try:
                 # Note: 'streamer' matches sync iteration protocol
                 # We wrap it or iterate carefully. Since it blocks, this runs in threadpool if async def?
@@ -97,6 +101,11 @@ async def chat(request: ChatRequest, raw_request: Request):
                 
                 # StreamingResponse iterates this generator.
                 for new_text in streamer:
+                    if first_token_time is None:
+                        first_token_time = time.time()
+                        ttft = first_token_time - start_time
+                        LOGGER.info(f"Time to First Token (TTFT): {ttft:.4f}s")
+                    
                     full_response += new_text
                     yield new_text
                     

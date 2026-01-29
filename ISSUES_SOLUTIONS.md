@@ -25,13 +25,15 @@
 - **使用镜像/加速:** 确保网络环境能够访问 HuggingFace，或者配置 HF 镜像站点。
 - **离线加载:** 将模型文件下载到本地 `medgemma-1.5-4b-it` 文件夹中，程序会自动检测并加载本地模型（详见 `model_engine.py` 中的 `load_model` 逻辑）。
 
-## 3. 显存不足 (OOM / Out of Memory)
+## 3. 显存不足与异常占用 (OOM & Excessive VRAM Usage)
 
 **问题描述 (Issue):**
-MedGemma 4B 模型全精度加载可能需要约 8GB+ 显存。如果显存较小（如 6GB 或 8GB 且有其他占用），可能会导致 OOM。
+MedGemma 4B 模型全精度加载可能需要约 8GB+ 显存。
+此外，**发现显卡加载权重时会占用过多额外显存空间**，导致即使理论显存足够，实际加载后也会频繁爆显存 (OOM)。这通常是因为 PyTorch/HuggingFace 在加载过程中保留了中间缓冲区的内存。
 
 **解决方案 (Solution):**
-- **启用 4-bit 量化:** 本项目默认集成了 `bitsandbytes` 量化。在 `config/` 或代码中确认 `use_quantization=True`。这可以将显存占用降低到 4GB 左右。
+- **启用 4-bit 量化:** 本项目默认集成了 `bitsandbytes` 量化（显存降至 ~4GB）。
+- **加载后清空缓存 (Post-Load Cache Clearing):** 代码实现了在 `load_model` 完成后立即执行 `torch.cuda.empty_cache()`。这可以释放 1GB-2GB 的“保留但未使用 (Reserved)”显存，显著降低 OOM 风险并提升图像处理时的稳定性。
 
 ## 4. 上下文长度限制 (Context Window Limits)
 
