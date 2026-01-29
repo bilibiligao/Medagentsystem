@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+python-multipart
+transformers
+torch
+accelerate
+pillow
+bitsandbytes
+scipy
+pydantic
+protobuf
+sentencepiece

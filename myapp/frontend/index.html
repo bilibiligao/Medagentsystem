@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MedGemma 智能诊疗系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        medical: {
+                            50: '#f0f9ff',
+                            100: '#e0f2fe',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                            900: '#0c4a6e',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        /* Mobile Viewport Fix */
+        html, body {
+            height: 100%;
+            width: 100%;
+            overflow: hidden; /* Prevent body scroll */
+            position: fixed; /* Force fix to viewport */
+            top: 0;
+            left: 0;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 flex flex-col">
+    <div id="app" class="w-full h-full flex flex-col relative overflow-hidden">
+        <!-- Header -->
+        <header class="bg-gray-800 border-b border-gray-700 p-3 sm:p-4 flex justify-between items-center shadow-lg z-10">
+            <div class="flex items-center gap-2 sm:gap-3">
+                <button @click="showHistory = !showHistory" class="lg:hidden text-gray-400 hover:text-white transition p-2 rounded-full hover:bg-gray-700">
+                    <i class="fa-solid fa-bars text-xl"></i>
+                </button>
+                <i class="fa-solid fa-notes-medical text-2xl text-blue-500"></i>
+                <h1 class="text-lg sm:text-xl font-bold tracking-wide">AI 诊疗助手</h1>
+            </div>
+            <div class="flex items-center gap-2">
+                <button @click="createNewSession" class="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-sm mr-2 transition flex items-center gap-2">
+                    <i class="fa-solid fa-plus"></i> <span class="hidden sm:inline">新对话</span>
+                </button>
+                <button @click="showSettings = !showSettings" class="text-gray-400 hover:text-white transition p-2 rounded-full hover:bg-gray-700">
+                    <i class="fa-solid fa-gear text-xl"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="flex-1 flex overflow-hidden relative">
+            
+            <!-- History Sidebar -->
+            <div :class="['bg-gray-800 border-r border-gray-700 flex flex-col transition-all duration-300 z-20',
+                showHistory ? 'absolute inset-y-0 left-0 w-64' : 'hidden lg:flex lg:w-64 lg:static']">
+                
+                <div class="p-4 border-b border-gray-700">
+                    <button @click="createNewSession" class="w-full bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/50 rounded-lg p-3 flex items-center justify-center gap-2 transition">
+                        <i class="fa-solid fa-plus"></i> 新建对话
+                    </button>
+                </div>
+
+                <div class="flex-1 overflow-y-auto p-2 space-y-1">
+                    <div v-for="session in sessions" :key="session.id" 
+                        @click="switchSession(session.id)"
+                        :class="['p-3 rounded-lg cursor-pointer flex justify-between items-center group transition', 
+                            currentSessionId === session.id ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700/50 hover:text-gray-200']">
+                        
+                        <div class="flex items-center gap-3 overflow-hidden">
+                            <i class="fa-regular fa-message text-xs"></i>
+                            <span class="truncate text-sm">{{ session.title }}</span>
+                        </div>
+                        
+                        <button @click.stop="deleteSession(session.id, $event)" class="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 p-1 transition">
+                            <i class="fa-solid fa-trash text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Area -->
+            <div class="flex-1 flex flex-col min-w-0 bg-gray-900">
+                <!-- Messages -->
+                <div class="flex-1 overflow-y-auto p-4 space-y-6 scroll-smooth" ref="chatContainer">
+                    <div v-if="messages.length === 0" class="flex flex-col items-center justify-center h-full text-gray-500 opacity-60">
+                        <i class="fa-solid fa-robot text-6xl mb-4"></i>
+                        <p class="text-lg">上传医学影像或开始对话...</p>
+                    </div>
+
+                    <div v-for="(msg, index) in messages" :key="index" 
+                        :class="['flex w-full group', msg.role === 'user' ? 'justify-end' : 'justify-start']">
+                        
+                        <div :class="['max-w-[80%] rounded-2xl p-4 shadow-md relative', 
+                            msg.role === 'user' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-gray-800 text-gray-100 rounded-tl-sm border border-gray-700']">
+                            
+                            <!-- Edit Mode -->
+                            <div v-if="editingIndex === index" class="w-full min-w-[300px]">
+                                <textarea v-model="editText" rows="5" class="w-full bg-gray-900/50 p-2 rounded border border-gray-500 text-sm focus:border-blue-400 focus:outline-none text-white resize-y"></textarea>
+                                <div class="flex justify-end gap-2 mt-2">
+                                    <button @click="cancelEdit" class="text-xs px-3 py-1 bg-gray-600 rounded hover:bg-gray-500 transition">取消</button>
+                                    <button @click="saveEdit(index)" class="text-xs px-3 py-1 bg-green-600 rounded hover:bg-green-500 text-white transition">保存</button>
+                                </div>
+                            </div>
+
+                            <!-- Display Mode -->
+                            <div v-else>
+                                <!-- Floating Toolbar (Visible on Hover) -->
+                                <div :class="['absolute -top-3 flex gap-1 bg-gray-700/90 rounded-full px-2 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-200 border border-gray-600 shadow-sm z-10', msg.role === 'user' ? 'right-0' : 'left-0']">
+                                    <button @click="startEdit(index, msg.content.find(c=>c.type==='text')?.text)" class="text-gray-300 hover:text-white p-1 text-xs" title="编辑内容">
+                                        <i class="fa-solid fa-pen"></i>
+                                    </button>
+                                     <!-- Only allow 'SetActive' if there is an image -->
+                                    <button v-if="msg.content.some(c => c.type === 'image')" 
+                                            @click="setActiveFloatingImage(msg.content.find(c => c.type === 'image').image)" 
+                                            class="text-gray-300 hover:text-blue-400 p-1 text-xs" title="置顶悬浮影像">
+                                        <i class="fa-solid fa-up-right-from-square"></i>
+                                    </button>
+                                    <button @click="deleteMessage(index)" class="text-gray-300 hover:text-red-400 p-1 text-xs" title="删除消息">
+                                        <i class="fa-solid fa-trash"></i>
+                                    </button>
+                                </div>
+
+                                <!-- Display Image if present -->
+                                <div v-if="msg.content.some(c => c.type === 'image')" class="mb-3">
+                                    <template v-for="(item, i) in msg.content">
+                                        <img v-if="item.type === 'image'" :src="item.image" class="max-h-64 rounded-lg border border-gray-600 cursor-pointer hover:opacity-90 transition" @click="previewImage(item.image)" />
+                                    </template>
+                                </div>
+
+                                <!-- Display Text -->
+                                <div class="prose prose-invert max-w-none text-sm leading-relaxed">
+                                    <template v-for="(item, i) in msg.content">
+                                        <div v-if="item.type === 'text'" v-html="renderMarkdown(item.text)"></div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Loading Indicator -->
+                    <div v-if="isLoading" class="flex justify-start w-full">
+                        <div class="bg-gray-800 rounded-2xl rounded-tl-sm p-4 border border-gray-700 flex items-center gap-2">
+                            <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                            <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce delay-75"></div>
+                            <div class="w-2 h-2 bg-blue-500 rounded-full animate-bounce delay-150"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Input Area -->
+                <div class="bg-gray-800 p-2 sm:p-4 border-t border-gray-700 shrink-0 z-30" style="padding-bottom: env(safe-area-inset-bottom, 20px);">
+                    <!-- Image Preview Area -->
+                    <div v-if="pendingImage" class="mb-2 sm:mb-4 flex items-start gap-4 p-2 sm:p-3 bg-gray-700 rounded-lg relative w-fit">
+                        <img :src="pendingImage" class="h-16 sm:h-20 w-auto rounded border border-gray-500">
+                        <button @click="clearPendingImage" class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center shadow-sm hover:bg-red-600">
+                            <i class="fa-solid fa-times text-xs"></i>
+                        </button>
+                    </div>
+
+                    <div class="flex gap-2 items-end max-w-5xl mx-auto">
+                        <label class="shrink-0 cursor-pointer text-gray-400 hover:text-blue-400 p-3 rounded-full hover:bg-gray-700 transition" title="上传影像">
+                            <i class="fa-solid fa-image text-xl"></i>
+                            <input type="file" accept="image/*" class="hidden" @change="handleImageUpload">
+                        </label>
+                        
+                        <div class="flex-1 bg-gray-700 rounded-xl flex items-center border border-gray-600 focus-within:border-blue-500 focus-within:ring-1 focus-within:ring-blue-500 transition min-w-0">
+                            <textarea v-model="userInput" 
+                                @keydown.enter.prevent="sendMessage"
+                                placeholder="描述影像内容或输入您的问题..." 
+                                class="w-full bg-transparent text-white p-3 max-h-32 resize-none focus:outline-none scrollbar-hide"
+                                rows="1"></textarea>
+                        </div>
+
+                        <!-- Regenerate (Redo) Button -->
+                        <button v-if="!isLoading && messages.length > 0" 
+                                @click="regenerate"
+                                class="shrink-0 bg-gray-700 hover:bg-gray-600 text-gray-300 p-3 rounded-xl transition shadow-lg w-12 h-12 flex items-center justify-center"
+                                title="重新生成上一条回复">
+                            <i class="fa-solid fa-rotate-right"></i>
+                        </button>
+
+                        <!-- Send Button -->
+                        <button v-if="!isLoading" 
+                                @click="sendMessage" 
+                                :disabled="!userInput && !pendingImage"
+                                class="shrink-0 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:cursor-not-allowed text-white p-3 rounded-xl transition shadow-lg w-12 h-12 flex items-center justify-center">
+                            <i class="fa-solid fa-paper-plane"></i>
+                        </button>
+
+                        <!-- Stop Button -->
+                        <button v-else 
+                                @click="stopGeneration" 
+                                class="shrink-0 bg-red-500 hover:bg-red-600 text-white p-3 rounded-xl transition shadow-lg w-12 h-12 flex items-center justify-center">
+                            <i class="fa-solid fa-stop"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Sidebar -->
+            <transition name="slide">
+                <div v-if="showSettings" class="absolute inset-y-0 right-0 w-80 bg-gray-800 border-l border-gray-700 shadow-2xl p-6 z-20 flex flex-col">
+                    <div class="flex justify-between items-center mb-6">
+                        <h2 class="text-xl font-bold">设置</h2>
+                        <button @click="showSettings = false" class="text-gray-400 hover:text-white"><i class="fa-solid fa-times"></i></button>
+                    </div>
+                    
+                    <div class="space-y-6 flex-1 overflow-y-auto">
+                        <div class="space-y-2">
+                            <label class="text-sm font-medium text-gray-300">系统提示词 (System Prompt)</label>
+                            <textarea v-model="settings.systemPrompt" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-sm focus:border-blue-500 focus:outline-none h-32"></textarea>
+                            <p class="text-xs text-gray-500">定义 AI 的角色，例如"你是一位专业的放射科医生"。</p>
+                        </div>
+
+                        <div class="space-y-2">
+                            <label class="text-sm font-medium text-gray-300">Temperature (创造性)</label>
+                            <input type="range" v-model.number="settings.temperature" min="0" max="1" step="0.1" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+                            <div class="flex justify-between text-xs text-gray-400">
+                                <span>精确 (0.0)</span>
+                                <span>{{ settings.temperature }}</span>
+                                <span>创造性 (1.0)</span>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2">
+                            <label class="text-sm font-medium text-gray-300">Top P (核采样)</label>
+                            <input type="range" v-model.number="settings.topP" min="0" max="1" step="0.05" class="w-full h-2 bg-gray-600 rounded-lg appearance-none cursor-pointer">
+                            <div class="flex justify-between text-xs text-gray-400">
+                                <span>0.0</span>
+                                <span>{{ settings.topP }}</span>
+                                <span>1.0</span>
+                            </div>
+                        </div>
+                        
+                        <div class="space-y-2">
+                           <label class="text-sm font-medium text-gray-300">Max Tokens (回复长度)</label>
+                           <input type="number" v-model.number="settings.maxTokens" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-sm focus:border-blue-500 focus:outline-none">
+                        </div>
+
+                        <div class="space-y-2">
+                           <label class="text-sm font-medium text-gray-300">Context Window (上下文窗口)</label>
+                           <input type="number" v-model.number="settings.contextWindow" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-sm focus:border-blue-500 focus:outline-none">
+                           <p class="text-xs text-gray-500">控制发送给模型的历史记录长度。数值越大，模型能记住的对话越多，但速度越慢且占用显存。</p>
+                        </div>
+
+                        <div class="space-y-2">
+                           <label class="text-sm font-medium text-gray-300">API 地址</label>
+                           <input type="text" v-model="settings.apiEndpoint" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-sm focus:border-blue-500 focus:outline-none">
+                        </div>
+
+                        <button @click="resetSettings" class="w-full py-3 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-700 transition text-sm flex items-center justify-center">
+                            <i class="fa-solid fa-rotate-left mr-2"></i> 恢复默认设置
+                        </button>
+                    </div>
+                    
+                    <button @click="deleteSession(currentSessionId)" class="mt-6 w-full py-2 border border-red-500 text-red-400 rounded-lg hover:bg-red-500/10 transition">
+                        删除当前对话
+                    </button>
+                    
+                    <div class="mt-4 text-center text-xs text-gray-600">
+                        MedGemma 1.5 Local
+                    </div>
+                </div>
+            </transition>
+        </main>
+
+        <!-- Image Gallery Modal (Simple) -->
+        <div v-if="previewImageUrl" class="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" @click="previewImageUrl = null">
+            <img :src="previewImageUrl" class="max-w-full max-h-full rounded-lg shadow-2xl">
+        </div>
+
+        <!-- Floating Active Image (Bottom Right) -->
+        <transition name="slide-up">
+            <div v-if="activeFloatingImage" class="fixed bottom-24 right-6 w-56 z-30 bg-gray-800/90 border border-gray-600 rounded-xl shadow-2xl p-2 transition-all duration-300 hover:w-96 backdrop-blur-md group">
+                <div class="relative">
+                     <!-- Drag handle / Title could go here -->
+                    <div class="absolute -top-3 left-2 bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-full shadow-sm">
+                        当前参考影像
+                    </div>
+                    <img :src="activeFloatingImage" class="w-full h-auto rounded-lg border border-gray-500/50 cursor-zoom-in" @click="previewImage(activeFloatingImage)">
+                    
+                    <button @click="activeFloatingImage = null" class="absolute -top-2 -right-2 bg-gray-700 text-gray-300 border border-gray-500 hover:bg-red-500 hover:text-white rounded-full w-6 h-6 flex items-center justify-center shadow-lg transition z-40">
+                         <i class="fa-solid fa-times text-xs"></i>
+                    </button>
+                    
+                    <!-- Placeholder for future annotation controls -->
+                    <div class="mt-2 hidden group-hover:block transition-all">
+                         <div class="flex justify-center gap-2">
+                             <button class="text-xs bg-gray-700 hover:bg-gray-600 px-2 py-1 rounded text-gray-300" title="暂未开放">
+                                <i class="fa-solid fa-draw-polygon mr-1"></i> 标注病灶
+                             </button>
+                         </div>
+                    </div>
+                </div>
+            </div>
+        </transition>
+
+    </div>
+    <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,30 @@
+# --- MedGemma Model Weights (关键：排除模型权重) ---
+# 这些文件通常有几 GB，Git 无法上传。用户需要自行下载。
+myapp/medgemma-1.5-4b-it/
+medgemma-1.5-4b-it/
+# 排除原始 medgemma 参考仓库
+medgemma/
+*.safetensors
+*.bin
+*.pth
+
+# --- Python Environment & Logs (排除环境和日志) ---
+.venv/
+env/
+venv/
+__pycache__/
+*.py[cod]
+*.log
+myapp/backend.log
+
+# --- IDE Settings (排除编辑器配置) ---
+.vscode/
+.idea/
+*.swp
+
+# --- OS Files ---
+.DS_Store
+Thumbs.db
+
+# --- Optional: Exclude large datasets if you have any ---
+notebooks/data/

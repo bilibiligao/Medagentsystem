@@ -1,0 +1,102 @@
+# MedGemma - 本地化医疗大模型应用 (Local Medical LLM Application)
+
+本项目基于 Google 的 **MedGemma** 开源模型，构建了一个可本地部署、支持多模态交互（文本+图像）的医疗辅助对话系统。项目包含完整的前端界面、后端 API 服务以及环境配置工具。
+
+## 1. 技术路线 (Technical Route)
+
+本项目采用了现代化的 Python 全栈开发架构：
+
+*   **模型层 (Model Layer):**
+    *   **核心模型:** `google/medgemma-1.5-4b-it` (经过指令微调的 40 亿参数医疗专用模型)。
+    *   **推理框架:** Hugging Face `transformers` 库进行模型加载与推理。
+    *   **优化技术:** 使用 `bitsandbytes` 进行 **4-bit 量化 (Quantization)**，大幅降低显存需求，使其能在消费级显卡（如 RTX 3060/4060）上流畅运行。
+    *   **多模态处理:** 集成 `Pillow` 处理图像输入，支持图文混合对话（如输入 X 光片进行咨询）。
+
+*   **后端服务层 (Backend Service):**
+    *   **框架:** `FastAPI`，提供高性能的异步 HTTP 接口。
+    *   **协议:** 遵循 OpenAI 风格的 JSON 接口格式，便于与现有的 LLM 工具链集成。
+    *   **上下文管理:** 自定义 `ContextManager`，实现了基于启发式算法的 Token 窗口管理，确保长对话中不再丢失关键的 System Prompt 和图像信息。
+
+*   **前端展示层 (Frontend):**
+    *   HTML/CSS/JS 构建的轻量级 Web 界面。
+    *   支持实时流式输出 (Streaming, 待确认是否已完全集成) 和多轮对话展示。
+
+## 2. 文件结构 (File Structure)
+
+本项目主要包含以下核心目录：
+
+```text
+e:\MedGemma
+├── medgemma/                 # Google 官方 MedGemma 原始仓库代码 (Reference)
+├── myapp/                    # 本项目的核心应用代码目录
+│   ├── backend/              # 后端服务代码
+│   │   ├── app.py            # FastAPI 主入口文件 
+│   │   ├── model_engine.py   # 模型加载与推理引擎 
+│   │   ├── context_manager.py# 上下文长度管理器 
+│   │   ├── config_loader.py  # 配置加载器
+│   │   └── requirements.txt  # 后端依赖列表
+│   ├── frontend/             # 前端静态资源 (HTML/CSS/JS)
+│   ├── medgemma-1.5-4b-it/   # 本地模型权重文件夹 (可离线加载)
+│   ├── 环境脚本/             # 环境配置辅助脚本 (如 GPU 修复)
+│   ├── run_local.bat         # 一键启动脚本
+│   └── package.py            # 打包/部署工具
+├── requirements.txt          # 项目统一依赖文件
+├── README.md                 # 项目说明文档 (本文档)
+├── ISSUES_SOLUTIONS.md       # 常见问题与解决方案汇总
+└── FEATURES.md               # 已完成功能列表
+```
+
+## 3. 环境配置与安装 (Installation)
+
+### 3.1 前置要求
+*   Python 3.10+
+*   NVIDIA 显卡 (建议显存 >= 6GB)
+*   CUDA Toolkit 12.1+
+
+### 3.2 安装步骤
+
+1.  **克隆项目:**
+    ```bash
+    git clone https://github.com/your-username/MedGemma.git
+    cd MedGemma
+    ```
+
+2.  **下载模型权重 (关键步骤):**
+    由于 GitHub 文件大小限制，**模型权重文件未包含在仓库中**。
+    *   **方法 A (自动):** 运行程序时，`model_engine.py` 会尝试自动从 Hugging Face Hub 下载 `google/medgemma-1.5-4b-it`。请确保你有良好的网络连接。
+    *   **方法 B (手动离线 - 推荐):**
+        1.  访问 Hugging Face: [google/medgemma-1.5-4b-it](https://huggingface.co/google/medgemma-1.5-4b-it/tree/main)
+        2.  下载所有文件 (特别是 `.safetensors`, `config.json`, `tokenizer.json` 等)。
+        3.  将文件放入项目目录下的 `myapp/medgemma-1.5-4b-it/` 文件夹中。
+
+3.  **创建虚拟环境:**
+    ```bash
+    python -m venv .venv
+    .venv\Scripts\activate
+    ```
+
+4.  **安装依赖:**
+    更新后的 `requirements.txt` 位于项目根目录。
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+3.  **修复 PyTorch GPU 版本 (重要):**
+    如果你发现 `torch.cuda.is_available()` 返回 False，请运行以下命令或使用 `myapp/环境脚本/fix_torch_gpu.bat`：
+    ```bash
+    pip uninstall torch torchvision torchaudio -y
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+    ```
+
+## 4. 代码说明 (Code Documentation)
+
+为了方便开发者理解，核心代码文件 (`app.py`, `model_engine.py`, `context_manager.py`) 中的关键英文注释已保留，并补充了对应的**中文双语注释**。
+
+*   **`app.py`**: 定义了 API 接口、数据模型 (Pydantic models) 和生命周期管理。
+*   **`model_engine.py`**: 封装了 `load_model` 逻辑，处理模型路径自动探测（优先本地 `myapp/medgemma-1.5-4b-it`，其次 HuggingFace Hub）及 GPU 量化加载。
+*   **`context_manager.py`**: 实现了智能的消息修剪策略，优先保护图像数据的完整性。
+
+## 5. 更多文档 (More Documentation)
+
+*   [常见问题与解决方案 (ISSUES_SOLUTIONS.md)](./ISSUES_SOLUTIONS.md)
+*   [功能列表 (FEATURES.md)](./FEATURES.md)
