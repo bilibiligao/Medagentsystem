@@ -143,16 +143,21 @@ class DetectionService:
                              except ValueError:
                                  continue
                              
-                             # 2. Key Update: All coords should now be treated as 0-1000 scale
-                             # Normalize everything to 0-100 for frontend percentage rendering
+                             # 1. Convert to Int and Handle Strings/Floats (Model outputs 0-1000)
+                             try:
+                                 ymin, xmin, ymax, xmax = [float(c) for c in box]
+                             except ValueError:
+                                 continue
+                             
+                             # 2. Normalize to 0-100 for frontend (viewBox 0 0 100 100)
                              ymin = ymin / 10
                              xmin = xmin / 10
                              ymax = ymax / 10
                              xmax = xmax / 10
 
                              # 3. Fix Geometry (Zero width/height)
-                             if ymax <= ymin: ymax = min(ymin + 10, 100)
-                             if xmax <= xmin: xmax = min(xmin + 10, 100)
+                             if ymax <= ymin: ymax = min(ymin + 1, 100) # Min 1% height
+                             if xmax <= xmin: xmax = min(xmin + 1, 100) # Min 1% width
 
                              # 4. Clamp to 0-100
                              ymin = max(0, min(ymin, 100))

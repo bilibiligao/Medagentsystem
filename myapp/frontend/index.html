@@ -323,7 +323,7 @@
                         <img :src="activeFloatingImage" class="w-full h-auto rounded-lg border border-gray-500/50 cursor-zoom-in" @click="previewImage(activeFloatingImage)">
                         
                         <!-- SVG Overlay for Bounding Boxes -->
-                        <svg v-if="currentFindings.length > 0" class="absolute inset-0 w-full h-full pointer-events-none rounded-lg" viewBox="0 0 1000 1000" preserveAspectRatio="none">
+                        <svg v-if="currentFindings.length > 0" class="absolute inset-0 w-full h-full pointer-events-none rounded-lg" viewBox="0 0 100 100" preserveAspectRatio="none">
                             <g v-for="(finding, idx) in currentFindings" :key="idx">
                                 <rect 
                                     :x="finding.box_2d[1]" 
