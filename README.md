@@ -33,7 +33,7 @@ e:\MedGemma
 │   ├── backend/              # Python 后端 (FastAPI 模型服务)
 │   │   ├── app.py            # FastAPI 主入口
 │   │   ├── model_engine.py   # 模型加载与推理引擎
-│   │   ├── detection_service.py # YOLO/检测服务 (初步集成)
+│   │   ├── detection_service.py # 初步集成利用多模态实现定位
 │   │   └── ...
 │   ├── frontend/             # Node.js 前端 (Express 服务)
 │   │   ├── server.js         # Node.js 服务入口
@@ -57,47 +57,20 @@ e:\MedGemma
 
 ### 3.2 安装步骤
 
-#### 第一步：后端服务 (Python)
-
-1.  **创建虚拟环境并安装依赖:**
+1.  **克隆项目:**
     ```bash
-    python -m venv .venv
-    .venv\Scripts\activate
-    pip install -r myapp/backend/requirements.txt
+    git clone https://github.com/your-username/MedGemma.git
+    cd MedGemma
     ```
 
-2.  **启动后端:**
-    ```bash
-    cd myapp/backend
-    uvicorn app:app --host 0.0.0.0 --port 8000
-    ```
-    *注意：首次启动会自动下载模型或加载本地模型，耗时较长。*
+2.  **下载模型权重 (关键步骤):**
+    由于 GitHub 文件大小限制，**模型权重文件未包含在仓库中**。
+    *   **方法 A (自动):** 运行程序时，`model_engine.py` 会尝试自动从 Hugging Face Hub 下载 `google/medgemma-1.5-4b-it`。请确保你有良好的网络连接。
+    *   **方法 B (手动离线 - 推荐):**
+        1.  访问 Hugging Face: [google/medgemma-1.5-4b-it](https://huggingface.co/google/medgemma-1.5-4b-it/tree/main)
+        2.  下载所有文件 (特别是 `.safetensors`, `config.json`, `tokenizer.json` 等)。
+        3.  将文件放入项目目录下的 `myapp/medgemma-1.5-4b-it/` 文件夹中。
 
-#### 第二步：前端服务 (Node.js)
-
-1.  **安装依赖:**
-    ```bash
-    cd myapp/frontend
-    npm install
-    ```
-
-2.  **启动前端:**
-    ```bash
-    # 方式 A
-    npm start
-    # 方式 B
-    node server.js
-    ```
-    访问 `http://localhost:3000` 即可使用。
-
-### 3.3 模型权重配置
-*   请参考**技术路线**章节中的量化说明。如有显存压力，项目默认开启 4-bit 量化 (bitsandbytes)。
-*   **重要:** 我们尝试了 8-bit 和 BF16 全精度加载，但在普通消费级显卡上均遇到 OOM 或性能瓶颈，因此目前 **4-bit NF4 量化** 是最推荐的稳定方案。
-
-### 3.4 常见问题修复
-*   **GPU 版本 Torch:** 如遇 Torch 无法识别 GPU，请运行 `myapp/环境脚本/fix_torch_gpu.bat`。
-
-## 4. 代码说明 (Code Documentation)
 
 ## 4. 代码说明 (Code Documentation)
 

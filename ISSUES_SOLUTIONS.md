@@ -43,19 +43,7 @@ MedGemma 4B 模型全精度加载可能需要约 8GB+ 显存。
 **解决方案 (Solution):**
 - **上下文管理:** 实现了 `ContextManager` 类（`myapp/backend/context_manager.py`），采用启发式算法自动修剪旧消息，同时保留系统提示词和图像消息，确保输入始终在安全范围内。
 
-## 5. 量化方案的选择历程 (Quantization Experiments)
-
-**问题描述 (Issue):**
-在追求更高模型精度的过程中，我们尝试了多种加载方案，但均遇到瓶颈：
-1.  **BF16 全精度:** 在 8GB 显存显卡上直接 OOM (Out of Memory)，系统显存占用瞬间飙升至 12GB+。
-2.  **8-bit (int8) 量化:** 虽然能勉强加载进显存，但在推理过程中出现计算精度异常，导致模型输出乱码或无法停止生成。
-
-**解决方案 (Solution):**
-- **回归 4-bit NF4:** 最终决定采用 `bitsandbytes` 的 4-bit NF4 (Normal Float 4) 量化。
-- **优势:** 这是目前性价比最高的方案。它将显存占用稳定在 3.5GB - 4.5GB 之间，同时保留了大部分推理精度，完全满足医疗辅助对话的需求。
-- **代码实现:** 在 `model_engine.py` 中硬编码了优先使用 4-bit 的逻辑。
-
-## 6. 前端无法连接后端 (Frontend Connection Issues)
+## 5. 前端无法连接后端 (Frontend Connection Issues)
 
 **问题描述 (Issue):**
 前端页面发起请求时失败，控制台显示 CORS 错误或连接被拒绝。
@@ -64,18 +52,19 @@ MedGemma 4B 模型全精度加载可能需要约 8GB+ 显存。
 - **CORS 配置:** 后端 `app.py` 已经配置了 `CORSMiddleware` 允许跨域请求 (`allow_origins=["*"]`)。
 - **端口检查:** 确保后端服务运行在正确端口（默认 8000），前端请求地址匹配。
 
-## 6. 病灶检测 (Lesion Detection)
+## 6. 病灶检测与定位精度 (Lesion Detection Accuracy)
 
-### [Issue] 检测框极小或位置严重偏移
-*   **现象**: SVG 渲染出的红框挤在图片左上角，或完全不对应病灶位置。
-*   **原因**: **坐标系不匹配**。
-    - 模型训练数据使用的是 **0-1000** 的整数坐标系。
-    - 前端误以为是 0-100 或 0-1 坐标系进行渲染。
+### [Issue] 检测框偏移或“格点效应” (Coordinate Shift / Quantization Artifacts)
+*   **现象**: 病灶框大致位置正确，但不够贴合病灶边缘，或者总是出现在某些固定的网格位置上。
+*   **原因**: **坐标系与 Token 映射不匹配**。
+    - MedGemma (PaliGemma) 架构本质上将图片分割为 grid，并使用 0-1024 的离散位置 Token (`<loc0000>` - `<loc1024>`) 进行预测。
+    - 如果强迫模型输出 JSON 数字或使用 0-100/0-1000 坐标系，模型被迫进行不精确的数学换算（插值），导致精度损失（Quantization Error）。
 *   **解决方案**: 
-    - **后端**: 确保 Prompt 请求 "Integers 0-1000"。
-    - **前端**: 将 SVG 容器的 `viewBox` 设置为 `"0 0 1000 1000"`，从而让 SVG 自动处理缩放，无需手动计算百分比。
+    - **Prompt 策略**: 放弃 JSON 输出，改用原生 Token 格式：`<loc Y1><loc X1><loc Y2><loc X2> Label`。
+    - **坐标系**: 必须明确指定 coordinate space 为 **0-1024**。
+    - **后处理**: 在后端解析时，公式需更新为 `Original_Val / 1024 * 100%`。
 
-### [Issue] 模型输出英文标签 (Language Mismatch)
-*   **现象**: 哪怕用户用中文提问，Detection JSON 中的 `label` 依然是 "Lung Opacity"。
-*   **原因**: 模型的微调数据主要为英文，其内部对医学术语的表示倾向于英文。
-*   **解决方案**: 在 System Prompt 中添加强约束规则："All labels and descriptions MUST be in Simplified Chinese (简体中文)." 并且在 Few-Shot 示例中直接提供中文样本。
+### [Issue] 幻觉与偏见 (Hallucinations & Bias)
+*   **现象**: 模型倾向于找出 System Prompt 示例中提到的疾病（如每次都报“胸腔积液”）。
+*   **原因**: Prompt 中的 Few-Shot Example 包含了过于具体的疾病名称。
+*   **解决方案**: 将示例改为完全中性的占位符，如 `label: "异常部位名称"`，切断语义引导。

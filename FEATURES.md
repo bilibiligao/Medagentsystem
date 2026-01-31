@@ -50,7 +50,16 @@
 *   **对应文件:** `myapp/backend/app.py`
 *   **功能:** 利用 `uvicorn` 启动 FastAPI 服务。
 
-## 3. 前端功能 (Frontend Features)
+### 3. 前端功能 (Frontend Features - Node.js Rewrite)
+
+本次版本对前端进行了底层架构重写，从纯静态 HTML 升级为 **Node.js + Express** 服务应用。
+
+### 3.0 服务架构 (Service Architecture)
+*   **对应文件:** `myapp/frontend/server.js`
+*   **核心功能:**
+    *   使用 `express.static` 高效托管静态资源。
+    *   配置反向代理 API 路由 (如有需求) 或直接处理前端路由逻辑。
+    *   为未来引入 WebSocket 实时通信和用户数据库模块打下基础。
 
 ### 3.1 核心交互引擎 (Core Interaction Engine)
 *   **架构:** ES Modules 模块化设计 (单体 `app.js` 已弃用)。

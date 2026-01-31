@@ -44,31 +44,20 @@ class DetectionService:
         if custom_system_prompt:
              detection_system_prompt = custom_system_prompt
         else:
-             # MedGemma/PaliGemma style detection often works best with specific formatting instructions
-             # Optimized with "API Generator" persona for stricter JSON compliance
+             # MedGemma/PaliGemma native detection format
+             # Format: <locYmin><locXmin><locYmax><locXmax> Label
              detection_system_prompt = (
-                  "SYSTEM INSTRUCTION: think silently to analyze the image structure and anomalies step-by-step. "
-                  "You are an expert AI radiologist. Your task is to output a JSON list of bounding boxes for all pathological findings. "
+                  "SYSTEM INSTRUCTION: think silently to analyze the image. Detect all findings.\n"
+                  "You are an expert AI radiologist. \n"
                   "REQUIREMENTS:\n"
-                  "1. All labels and descriptions MUST be in Simplified Chinese (简体中文).\n"
-                  "2. Output format: A valid JSON list of objects.\n"
-                  "3. Object Schema: {\"label\": \"finding name\", \"box_2d\": [ymin, xmin, ymax, xmax], \"description\": \"clinical description\"}\n"
-                  "4. Coordinates: Integers 0-1000 representing relative coordinates. [ymin, xmin, ymax, xmax].\n"
-                  "5. GEOMETRY RULES: ymax must be > ymin. xmax must be > xmin. Do not output zero-width or zero-height boxes.\n"
-                  "6. VERY IMPORTANT: Detection boxes must be TIGHT around the specific lesion, not covering the whole lung.\n"
-                  "7. Example: [{\"label\": \"胸腔积液\", \"box_2d\": [650, 750, 950, 950], \"description\": \"右膈角变钝...\"}]"
+                  "1. Output MUST strictly follow the format: <loc0000><loc0000><loc0000><loc0000> label_description\n"
+                  "2. Use Simplified Chinese (简体中文) for labels.\n"
+                  "3. Coordinates are normalized 0-1024 in order [ymin, xmin, ymax, xmax].\n"
+                  "4. Example: <loc0256><loc0128><loc0512><loc0400> 异常部位名称\n"
              )
 
 
-        # Detection prompt construction
-        # Gemma models typically do not support "system" role at the very beginning of standard chat templates in all versions.
-        # But for MedGemma which fine-tunes Gemma, we must follow the specific template.
-        # The error "Conversation roles must alternate user/assistant/user/assistant/..." typically means the template expects user first.
-        # Or it doesn't support 'system' role directly in the messages list for apply_chat_template if the jinja template logic doesn't handle it as a special case.
-        
-        # Strategy: Merge System Prompt into the FIRST User Message.
-        # This is a universal fix for models that complain about role order or lack of system role support.
-        
+
         detection_prompt_content = [
              {"type": "image", "image": target_image},
              {"type": "text", "text": f"{user_prompt_text}\n\n请分析图像并标注病灶。Provide output in JSON format."}
@@ -127,69 +116,73 @@ class DetectionService:
                        # Maybe thought didn't close?
                        json_content = response_text
              
-             # Clean JSON string (remove markdown code blocks if any)
-             json_content = json_content.replace("```json", "").replace("```", "")
              # Also strip common special tokens that might persist
              for token in ["<end_of_turn>", "<eos>", "</s>"]:
                  json_content = json_content.replace(token, "")
              
              json_content = json_content.strip()
              
-             # Robust extraction: find outer brackets
-             start_idx = json_content.find('[')
-             end_idx = json_content.rfind(']')
-             if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                 json_content = json_content[start_idx:end_idx+1]
-             
-             # Post-process validation logic
+             # --- Parse PaliGemma Native Format <loc><loc><loc><loc> Label ---
+             import re
              parsed_findings = []
-             try:
-                 temp_findings = json.loads(json_content)
-                 if isinstance(temp_findings, list):
-                     for item in temp_findings:
-                         box = item.get("box_2d", [])
-                         if len(box) == 4:
-                             # 1. Convert to Int and Handle Strings/Floats
-                             try:
-                                 ymin, xmin, ymax, xmax = [int(float(c)) for c in box]
-                             except ValueError:
-                                 continue
-                             
-                             # 1. Convert to Int and Handle Strings/Floats (Model outputs 0-1000)
-                             try:
-                                 ymin, xmin, ymax, xmax = [float(c) for c in box]
-                             except ValueError:
-                                 continue
-                             
-                             # 2. Normalize to 0-100 for frontend (viewBox 0 0 100 100)
-                             ymin = ymin / 10
-                             xmin = xmin / 10
-                             ymax = ymax / 10
-                             xmax = xmax / 10
+             
+             # Regex for: <locY><locX><locY><locX> (optional space) Description
+             # Note: processor.decode(skip_special_tokens=False) might output tokens as "<loc0123>" string, 
+             # OR if special tokens are not decoded to text mapped, it might look slightly different.
+             # Assuming "<loc(\d{4})>" format based on HuggingFace standard for this model.
+             
+             # Pattern: Look for 4 consecutive loc tokens followed by text
+             # We handle potential spaces or newlines
+             pattern = re.compile(r"(?:<loc(\d{4})>){4}\s*([^<\n]+)")
+             
+             # Since format might be repeating, we search for all matches
+             matches = pattern.findall(json_content)
+             
+             if not matches and "loc" in json_content:
+                  # Fallback: maybe spaces between locs?
+                  pattern_loose = re.compile(r"<loc(\d{4})>\s*<loc(\d{4})>\s*<loc(\d{4})>\s*<loc(\d{4})>\s*([^<\n]+)")
+                  matches = pattern_loose.findall(json_content)
+             
+             if matches:
+                 for match in matches:
+                      # match is tuple: (y1, x1, y2, x2, label)
+                      if len(match) == 5:
+                           try:
+                                ymin, xmin, ymax, xmax = [int(val) for val in match[:4]]
+                                description = match[4].strip()
+                                
+                                # 2. Normalize to 0-100 for frontend (viewBox 0 0 100 100)
+                                # Model uses 0-1024 scale (PaliGemma standard)
+                                ymin = (ymin / 1024) * 100
+                                xmin = (xmin / 1024) * 100
+                                ymax = (ymax / 1024) * 100
+                                xmax = (xmax / 1024) * 100
 
-                             # 3. Fix Geometry (Zero width/height)
-                             if ymax <= ymin: ymax = min(ymin + 1, 100) # Min 1% height
-                             if xmax <= xmin: xmax = min(xmin + 1, 100) # Min 1% width
+                                # 3. Fix Geometry
+                                if ymax <= ymin: ymax = min(ymin + 1, 100)
+                                if xmax <= xmin: xmax = min(xmin + 1, 100)
 
-                             # 4. Clamp to 0-100
-                             ymin = max(0, min(ymin, 100))
-                             xmin = max(0, min(xmin, 100))
-                             ymax = max(0, min(ymax, 100))
-                             xmax = max(0, min(xmax, 100))
+                                # 4. Clamp
+                                ymin = max(0, min(ymin, 100))
+                                xmin = max(0, min(xmin, 100))
+                                ymax = max(0, min(ymax, 100))
+                                xmax = max(0, min(xmax, 100))
+                                
+                                parsed_findings.append({
+                                     "label": description, # Use description as label since format is simple
+                                     "description": description,
+                                     "box_2d": [ymin, xmin, ymax, xmax]
+                                })
+                           except ValueError:
+                                continue
 
-                             item["box_2d"] = [ymin, xmin, ymax, xmax]
-                             parsed_findings.append(item)
-                 
-                 # Re-serialize to strict JSON string for frontend to parse safely
-                 json_content = json.dumps(parsed_findings, ensure_ascii=False)
-                 
-             except json.JSONDecodeError:
-                 pass # Let the caller handle the error or return raw
+             # Re-serialize to strict JSON string for frontend to parse safely
+             json_content = json.dumps(parsed_findings, ensure_ascii=False)
 
              return {
                   "raw_response": response_text,
                   "thought_trace": thought_content,
-                  "findings": json_content # Caller will attempt json.loads
+                  "findings": json_content
              }
              
         except Exception as e:
