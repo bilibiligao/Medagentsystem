@@ -18,8 +18,9 @@
     *   **上下文管理:** 自定义 `ContextManager`，实现了基于启发式算法的 Token 窗口管理，确保长对话中不再丢失关键的 System Prompt 和图像信息。
 
 *   **前端展示层 (Frontend):**
-    *   HTML/CSS/JS 构建的轻量级 Web 界面。
-    *   支持实时流式输出 (Streaming, 待确认是否已完全集成) 和多轮对话展示。
+    *   **架构升级:** 采用 **Node.js + Express** 进行重构，实现了前后端分离架构。
+    *   **技术栈:** 原生 HTML/JS/CSS (模块化开发) + Node.js 服务端。
+    *   **特性:** 支持实时流式输出 (Streaming)、Markdown 渲染、暗黑模式及移动端适配。
 
 ## 2. 文件结构 (File Structure)
 
@@ -29,68 +30,74 @@
 e:\MedGemma
 ├── medgemma/                 # Google 官方 MedGemma 原始仓库代码 (Reference)
 ├── myapp/                    # 本项目的核心应用代码目录
-│   ├── backend/              # 后端服务代码
-│   │   ├── app.py            # FastAPI 主入口文件 
-│   │   ├── model_engine.py   # 模型加载与推理引擎 
-│   │   ├── context_manager.py# 上下文长度管理器 
+│   ├── backend/              # Python 后端 (FastAPI 模型服务)
+│   │   ├── app.py            # FastAPI 主入口
+│   │   ├── model_engine.py   # 模型加载与推理引擎
+│   │   ├── detection_service.py # YOLO/检测服务 (初步集成)
 │   │   └── ...
-│   ├── frontend/             # 前端静态资源
+│   ├── frontend/             # Node.js 前端 (Express 服务)
+│   │   ├── server.js         # Node.js 服务入口
+│   │   ├── package.json      # 前端依赖配置
 │   │   ├── index.html        # 主界面
-│   │   └── js/               # ES Modules 模块化源码
-│   │       ├── main.js       # 入口
-│   │       ├── store.js      # 状态管理
-│   │       └── api/          # API 请求逻辑
+│   │   └── js/               # 前端逻辑脚本
 │   ├── medgemma-1.5-4b-it/   # 本地模型权重文件夹 (可离线加载)
-│   ├── 环境脚本/             # 环境配置辅助脚本 (如 GPU 修复)
-│   └── run_local.bat         # 一键启动脚本
-├── requirements.txt          # 项目统一依赖文件
-├── README.md                 # 项目说明文档 (本文档)
-├── ISSUES_SOLUTIONS.md       # 常见问题与解决方案汇总
-├── FEATURES.md               # 已完成功能列表
-└── EXPLORATION_JOURNEY.md    # 项目探索历程与技术决策记录
+│   ├── run_local.bat         # (已废弃，建议分别启动)
+│   └── ...
+├── requirements.txt          # Python 后端依赖
+├── README.md                 # 项目说明文档
+├── ...
 ```
 
 ## 3. 环境配置与安装 (Installation)
 
 ### 3.1 前置要求
-*   Python 3.10+
-*   NVIDIA 显卡 (建议显存 >= 6GB)
-*   CUDA Toolkit 12.1+
+*   **Python:** 3.10+ (后端环境)
+*   **Node.js:** 14.0+ (前端环境)
+*   **Hardware:** NVIDIA 显卡 (建议显存 >= 6GB), CUDA 12.1+
 
 ### 3.2 安装步骤
 
-1.  **克隆项目:**
-    ```bash
-    git clone https://github.com/your-username/MedGemma.git
-    cd MedGemma
-    ```
+#### 第一步：后端服务 (Python)
 
-2.  **下载模型权重 (关键步骤):**
-    由于 GitHub 文件大小限制，**模型权重文件未包含在仓库中**。
-    *   **方法 A (自动):** 运行程序时，`model_engine.py` 会尝试自动从 Hugging Face Hub 下载 `google/medgemma-1.5-4b-it`。请确保你有良好的网络连接。
-    *   **方法 B (手动离线 - 推荐):**
-        1.  访问 Hugging Face: [google/medgemma-1.5-4b-it](https://huggingface.co/google/medgemma-1.5-4b-it/tree/main)
-        2.  下载所有文件 (特别是 `.safetensors`, `config.json`, `tokenizer.json` 等)。
-        3.  将文件放入项目目录下的 `myapp/medgemma-1.5-4b-it/` 文件夹中。
-
-3.  **创建虚拟环境:**
+1.  **创建虚拟环境并安装依赖:**
     ```bash
     python -m venv .venv
     .venv\Scripts\activate
+    pip install -r myapp/backend/requirements.txt
     ```
 
-4.  **安装依赖:**
-    更新后的 `requirements.txt` 位于项目根目录。
+2.  **启动后端:**
     ```bash
-    pip install -r requirements.txt
+    cd myapp/backend
+    uvicorn app:app --host 0.0.0.0 --port 8000
+    ```
+    *注意：首次启动会自动下载模型或加载本地模型，耗时较长。*
+
+#### 第二步：前端服务 (Node.js)
+
+1.  **安装依赖:**
+    ```bash
+    cd myapp/frontend
+    npm install
     ```
 
-3.  **修复 PyTorch GPU 版本 (重要):**
-    如果你发现 `torch.cuda.is_available()` 返回 False，请运行以下命令或使用 `myapp/环境脚本/fix_torch_gpu.bat`：
+2.  **启动前端:**
     ```bash
-    pip uninstall torch torchvision torchaudio -y
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+    # 方式 A
+    npm start
+    # 方式 B
+    node server.js
     ```
+    访问 `http://localhost:3000` 即可使用。
+
+### 3.3 模型权重配置
+*   请参考**技术路线**章节中的量化说明。如有显存压力，项目默认开启 4-bit 量化 (bitsandbytes)。
+*   **重要:** 我们尝试了 8-bit 和 BF16 全精度加载，但在普通消费级显卡上均遇到 OOM 或性能瓶颈，因此目前 **4-bit NF4 量化** 是最推荐的稳定方案。
+
+### 3.4 常见问题修复
+*   **GPU 版本 Torch:** 如遇 Torch 无法识别 GPU，请运行 `myapp/环境脚本/fix_torch_gpu.bat`。
+
+## 4. 代码说明 (Code Documentation)
 
 ## 4. 代码说明 (Code Documentation)
 

@@ -43,7 +43,19 @@ MedGemma 4B 模型全精度加载可能需要约 8GB+ 显存。
 **解决方案 (Solution):**
 - **上下文管理:** 实现了 `ContextManager` 类（`myapp/backend/context_manager.py`），采用启发式算法自动修剪旧消息，同时保留系统提示词和图像消息，确保输入始终在安全范围内。
 
-## 5. 前端无法连接后端 (Frontend Connection Issues)
+## 5. 量化方案的选择历程 (Quantization Experiments)
+
+**问题描述 (Issue):**
+在追求更高模型精度的过程中，我们尝试了多种加载方案，但均遇到瓶颈：
+1.  **BF16 全精度:** 在 8GB 显存显卡上直接 OOM (Out of Memory)，系统显存占用瞬间飙升至 12GB+。
+2.  **8-bit (int8) 量化:** 虽然能勉强加载进显存，但在推理过程中出现计算精度异常，导致模型输出乱码或无法停止生成。
+
+**解决方案 (Solution):**
+- **回归 4-bit NF4:** 最终决定采用 `bitsandbytes` 的 4-bit NF4 (Normal Float 4) 量化。
+- **优势:** 这是目前性价比最高的方案。它将显存占用稳定在 3.5GB - 4.5GB 之间，同时保留了大部分推理精度，完全满足医疗辅助对话的需求。
+- **代码实现:** 在 `model_engine.py` 中硬编码了优先使用 4-bit 的逻辑。
+
+## 6. 前端无法连接后端 (Frontend Connection Issues)
 
 **问题描述 (Issue):**
 前端页面发起请求时失败，控制台显示 CORS 错误或连接被拒绝。
@@ -67,13 +79,3 @@ MedGemma 4B 模型全精度加载可能需要约 8GB+ 显存。
 *   **现象**: 哪怕用户用中文提问，Detection JSON 中的 `label` 依然是 "Lung Opacity"。
 *   **原因**: 模型的微调数据主要为英文，其内部对医学术语的表示倾向于英文。
 *   **解决方案**: 在 System Prompt 中添加强约束规则："All labels and descriptions MUST be in Simplified Chinese (简体中文)." 并且在 Few-Shot 示例中直接提供中文样本。
-
-## 7. 前端架构 (Frontend Architecture)
-
-### [Issue] 代码维护困难 (Monolithic Codebase)
-*   **现象**: 添加新功能（如设置面板）时，容易破坏原有的对话逻辑；文件过长需要反复滚动。
-*   **原因**: 单体脚本模式 (Monolithic Script) 导致关注点未分离。
-*   **解决方案**: **2026-01-30 完成重构 (ES Modules)**。
-    - 建立 `store.js` 管理全局状态。
-    - 拆分 `api/` 和 `components/` 目录。
-    - 在 `index.html` 中使用 `<script type="module" src="js/main.js"></script>`。
