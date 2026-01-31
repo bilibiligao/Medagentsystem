@@ -7,7 +7,9 @@ import os
 from threading import Thread
 import logging
 from typing import Optional
-from config_loader import CONFIG, LOGGER
+
+# Setup Logger
+LOGGER = logging.getLogger("MedGemma")
 
 class AbortStoppingCriteria(StoppingCriteria):
     def __init__(self):
@@ -21,24 +23,31 @@ class AbortStoppingCriteria(StoppingCriteria):
 
 class MedGemmaEngine:
     def __init__(self, use_quantization=None):
-        # Config priority: Constructor Arg > Config File > Default
-        # Config priority: Constructor Arg > Config File > Default (配置优先级：构造参数 > 配置文件 > 默认值)
-        self.model_id = CONFIG.get("model.model_id", None)
+        # HARDCODED CONFIGURATION (Removed ConfigLoader)
+        self.model_id = None 
         
         # Determine model path
-        # Determine model path (确定模型路径)
-        if self.model_id is None or (not os.path.exists(self.model_id) and "/" not in self.model_id):
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            local_model_path = os.path.join(base_dir, "medgemma-1.5-4b-it")
-            if os.path.exists(os.path.join(local_model_path, "config.json")):
-                LOGGER.info(f"Found local model at: {local_model_path}")
-                self.model_id = local_model_path
-            else:
-                LOGGER.info("Local model not found, falling back to HuggingFace Hub.")
-                self.model_id = "google/medgemma-1.5-4b-it"
+        # Priority: Local 8-bit > Local 4-bit > HuggingFace
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
+        path_base = os.path.join(base_dir, "medgemma-1.5-4b-it")
+        
+        # Default Strategy: Custom Split for Full BF16 Precision
+        # User requested full precision (No quantization) to improve lesion detection accuracy.
+        # However, 4B model + KV Cache > 8GB VRAM.
+        # We will custom split the model to offload overflow layers to CPU.
+        if os.path.exists(path_base):
+             self.model_id = path_base
+             LOGGER.info(f"Found local base model at: {self.model_id}")
+             self.quantization_type = "4bit" # Enable 4-bit quantization per user request
+        else:
+             LOGGER.info("Local model not found, falling back to HuggingFace Hub.")
+             self.model_id = "google/medgemma-1.5-4b-it"
+             self.quantization_type = "4bit"
 
-        config_quant = CONFIG.get("model.use_quantization", True)
-        self.use_quantization = config_quant if use_quantization is None else use_quantization
+        # Legacy override
+        if use_quantization is False:
+            self.quantization_type = "none"
         
         self.processor = None
         self.model = None
@@ -50,14 +59,32 @@ class MedGemmaEngine:
             torch.cuda.empty_cache()
             LOGGER.info(f"GPU Detected: {torch.cuda.get_device_name(0)}")
 
-        config_device = CONFIG.get("model.device_map", "auto")
-        # Logic to force GPU if available unless config overrides
-        # Logic to force GPU if available unless config overrides (除非配置覆盖，否则强制使用 GPU 的逻辑)
-        if torch.cuda.is_available() and config_device != "cpu":
-             device_map = {"": 0} 
-             LOGGER.info("Using device_map: {'': 0} (Forced GPU)")
+        # Hardcoded Device Map Logic for Custom Split
+        device_map = "auto" 
+        self.max_memory_mapping = None
+
+        # Logic to force GPU if available, but with CUSTOM SPLIT
+        if torch.cuda.is_available():
+             # Custom Logic: Reserve 1.2GB for System/KV Cache (More aggressive to maximize GPU usage)
+             # We use 'max_memory' argument to tell Accelerate/Transformers not to use more than X GB of VRAM.
+             
+             # total_vram = torch.cuda.get_device_properties(0).total_memory
+             # reserved_vram = 1.2 * 1024 * 1024 * 1024 # 1.2 GB reserved
+             # usable_vram = total_vram - reserved_vram
+             
+             # if usable_vram < 0:
+             #      usable_vram = 0.5 * 1024 * 1024 * 1024 # Fallback minimal 0.5GB
+             
+             # Convert to GiB string for max_memory
+             # usable_vram_gib = f"{usable_vram / (1024**3):.2f}GiB"
+             
+             # LOGGER.info(f"Custom VRAM Management: Total={total_vram/(1024**3):.2f}GiB, Usable={usable_vram_gib} (Reserved 1.2GB)")
+             
+             # We will inject max_memory into model_kwargs
+             # self.max_memory_mapping = {0: usable_vram_gib, "cpu": "32GiB"}
+             pass
         else:
-             device_map = config_device
+             device_map = "cpu"
              LOGGER.info(f"Using device_map: {device_map}")
 
         # Determine safe dtype (BF16 if supported, else FP16)
@@ -69,25 +96,40 @@ class MedGemmaEngine:
         model_kwargs = dict(
             torch_dtype=compute_dtype,
             device_map=device_map,
+            low_cpu_mem_usage=True, # Explicitly enable low cpu memory usage
             attn_implementation="sdpa", # Use Flash Attention 2 compatible implementation if available
         )
+        
+        if self.max_memory_mapping:
+             model_kwargs["max_memory"] = self.max_memory_mapping
 
-        if self.use_quantization:
+        if self.quantization_type and self.quantization_type.lower() != "none":
             try:
                 import bitsandbytes
-                LOGGER.info(f"Using 4-bit quantization (NF4 + Double Quant) | bitsandbytes: {bitsandbytes.__version__}")
-                model_kwargs["quantization_config"] = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_quant_type="nf4",       # Optimized for normal distribution weights
-                    bnb_4bit_use_double_quant=True,  # Memory efficiency
-                    bnb_4bit_compute_dtype=compute_dtype,
-                )
+                
+                if self.quantization_type == "4bit":
+                    LOGGER.info(f"Quantization: 4-bit (NF4) enabled.")
+                    model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                        load_in_4bit=True,
+                        bnb_4bit_quant_type="nf4",
+                        bnb_4bit_use_double_quant=True,
+                        bnb_4bit_compute_dtype=compute_dtype,
+                    )
+                elif self.quantization_type == "8bit":
+                    LOGGER.info(f"Quantization: 8-bit (Int8) enabled.")
+                    model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                        load_in_8bit=True,
+                        llm_int8_threshold=6.0,
+                    )
+                else:
+                    LOGGER.warning(f"Unknown quantization type: {self.quantization_type}. Skiping quantization.")
+
             except ImportError:
                 LOGGER.warning("bitsandbytes missing. Falling back.")
-                self.use_quantization = False
+                self.quantization_type = "none"
             except Exception as e:
                 LOGGER.error(f"Quantization Error: {e}")
-                self.use_quantization = False
+                self.quantization_type = "none"
 
         try:
             self.processor = AutoProcessor.from_pretrained(self.model_id, use_fast=False)
@@ -107,7 +149,7 @@ class MedGemmaEngine:
             
         except Exception as e:
             LOGGER.error(f"Error loading model (Retrying with CPU offload...): {e}")
-            if self.use_quantization and torch.cuda.is_available():
+            if (self.quantization_type and self.quantization_type != "none") and torch.cuda.is_available():
                 LOGGER.info("Attempting fallback with CPU Offload...")
                 model_kwargs["device_map"] = "auto"
                 # For 4-bit, we don't use llm_int8_enable_fp32_cpu_offload.
@@ -130,7 +172,7 @@ class MedGemmaEngine:
             return Image.open(io.BytesIO(image_bytes)).convert("RGB")
         return image_data
 
-    def generate(self, messages, max_new_tokens: Optional[int]=512, temperature: Optional[float]=0.7, top_p: Optional[float]=0.9):
+    def generate(self, messages, max_new_tokens: Optional[int]=None, temperature: Optional[float]=None, top_p: Optional[float]=None):
         if not self.model:
             self.load_model()
 
@@ -177,10 +219,10 @@ class MedGemmaEngine:
         
         inputs = inputs.to(self.model.device)
         
-        # Load params from Config if not provided
-        gen_max_tokens = max_new_tokens if max_new_tokens else CONFIG.get("parameters.max_new_tokens", 1024)
-        gen_temp = temperature if temperature else CONFIG.get("parameters.temperature", 0.7)
-        gen_top_p = top_p if top_p else CONFIG.get("parameters.top_p", 0.9)
+        # Load params (HARDCODED DEFAULTS) if not provided
+        gen_max_tokens = max_new_tokens if max_new_tokens else 1024
+        gen_temp = temperature if temperature else 0.7
+        gen_top_p = top_p if top_p else 0.9
 
         generation_args = {
             "max_new_tokens": gen_max_tokens,
@@ -209,6 +251,11 @@ class MedGemmaEngine:
                 # Ensure streamer is closed even if generation crashes
                 if not streamer.stop_signal:
                     streamer.end()
+                
+                # [Memory Cleanup]
+                # Essential for split-model / low-VRAM scenarios to prevent fragmentation OOM.
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
         thread = Thread(target=thread_target)
         thread.start()

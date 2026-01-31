@@ -6,13 +6,26 @@ from typing import List, Union, Optional, Any
 import os
 import time
 import logging
+import asyncio
+from starlette.concurrency import run_in_threadpool
 from contextlib import asynccontextmanager
 from model_engine import engine
-from config_loader import LOGGER
+# from config_loader import LOGGER # Removed
 from context_manager import context_manager 
 from detection_service import DetectionService # Import new service
 import uvicorn
 import json
+
+# Setup Logging Manually (Since config_loader is removed)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("backend.log", encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+LOGGER = logging.getLogger("MedGemma")
 
 # Request Models
 # Request Models (请求数据模型)
@@ -39,15 +52,24 @@ class ChatRequest(BaseModel):
 # App Lifecycle
 # App Lifecycle (应用生命周期)
 detection_service = None
+model_lock = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global detection_service
+    global detection_service, model_lock
+    # Initialize global lock for GPU resources
+    model_lock = asyncio.Lock()
+    
     detection_service = DetectionService(engine)
     
-    # Load model on startup (optional, can be lazy)
-    # Load model on startup (optional, can be lazy) (启动时加载模型（可选，也可懒加载）)
-    # engine.load_model()
+    # Load model on startup (Pre-load to VRAM)
+    LOGGER.info("Startup Event: Pre-loading model into VRAM...")
+    try:
+        engine.load_model()
+        LOGGER.info("Startup Event: Model loaded successfully.")
+    except Exception as e:
+        LOGGER.error(f"Startup Event: Model load failed: {e}")
+
     yield
     # Cleanup
     # Cleanup (清理资源)
@@ -79,14 +101,21 @@ class DetectRequest(BaseModel):
 @app.post("/api/detect")
 async def detect(request: DetectRequest):
     try:
-        # Convert Pydantic to dict
-        messages_data = [msg.model_dump() for msg in request.messages]
-        
-        # Call specialized detection service
-        # Pass system prompt from config if available
-        custom_system_prompt = request.config.system_prompt if request.config and request.config.system_prompt else None
-        
-        result = detection_service.detect_findings(messages_data, custom_system_prompt=custom_system_prompt)
+        # Acquire Lock for GPU
+        async with model_lock:
+            # Convert Pydantic to dict
+            messages_data = [msg.model_dump() for msg in request.messages]
+            
+            # Call specialized detection service
+            # Pass system prompt from config if available
+            custom_system_prompt = request.config.system_prompt if request.config and request.config.system_prompt else None
+            
+            # Use run_in_threadpool to keep event loop responsive while GPU works
+            result = await run_in_threadpool(
+                detection_service.detect_findings, 
+                messages_data, 
+                custom_system_prompt=custom_system_prompt
+            )
         
         # Try to parse JSON here for safety
         import json
@@ -119,61 +148,64 @@ async def chat(request: ChatRequest, raw_request: Request):
         elif messages_data and messages_data[0]['role'] == 'system' and request.config and request.config.system_prompt:
              messages_data[0]['content'] = request.config.system_prompt
 
+        # Sanitize messages to ensure alternating roles (User <-> Assistant)
+        # Fixes "Conversation roles must alternate" error when history contains consecutive same-role messages
+        messages_data = context_manager.sanitize_history_roles(messages_data)
+
         # Apply Context Management
         context_limit = request.config.context_window if request.config and request.config.context_window else 8192
         messages_data = context_manager.manage_context(messages_data, max_limit=context_limit)
 
-        streamer, stopper = engine.generate(
-            messages_data,
-            max_new_tokens=request.config.max_tokens if request.config else None, # Let engine decide default
-            temperature=request.config.temperature if request.config else None,
-            top_p=request.config.top_p if request.config else None
-        )
+        # NOTE: Moved engine.generate INSIDE the generator to protect with Lock
 
         async def event_generator():
             full_response = ""
             start_time = time.time()
             first_token_time = None
+            stopper = None
             
-            try:
-                # Note: 'streamer' matches sync iteration protocol
-                # We wrap it or iterate carefully. Since it blocks, this runs in threadpool if async def?
-                # Actually, TextIteratorStreamer is an iterator.
-                # To support async cancellation during blocking next(), we ideally need to run iteration in a thread.
-                # But simple iteration here combined with `finally` usually catches disconnects after a yield.
-                
-                # StreamingResponse iterates this generator.
-                for new_text in streamer:
-                    if first_token_time is None:
-                        first_token_time = time.time()
-                        ttft = first_token_time - start_time
-                        LOGGER.info(f"Time to First Token (TTFT): {ttft:.4f}s")
+            # Acquire Lock for duration of streaming
+            async with model_lock:
+                try:
+                    # Start Generation here, holding the lock
+                    streamer, stopper = engine.generate(
+                        messages_data,
+                        max_new_tokens=request.config.max_tokens if request.config else None,
+                        temperature=request.config.temperature if request.config else None,
+                        top_p=request.config.top_p if request.config else None
+                    )
+
+                    # Iterate streamer
+                    for new_text in streamer:
+                        if first_token_time is None:
+                            first_token_time = time.time()
+                            ttft = first_token_time - start_time
+                            LOGGER.info(f"Time to First Token (TTFT): {ttft:.4f}s")
+                        
+                        full_response += new_text
+                        yield new_text
+                        
+                        if await raw_request.is_disconnected():
+                            LOGGER.info("Client disconnected. Aborting generation.")
+                            stopper.abort()
+                            break
                     
-                    full_response += new_text
-                    yield new_text
+                    if not stopper.aborted:
+                        LOGGER.info(f"Generated Response: {full_response[:200]}..." if len(full_response) > 200 else f"Generated Response: {full_response}")
                     
-                    # Optional: Check if we should abort (if client disconnected) 
-                    # but request.is_disconnected() is an async method
-                    if await raw_request.is_disconnected():
-                         LOGGER.info("Client disconnected. Aborting generation.")
-                         stopper.abort()
-                         break
-                
-                # Log the full successful response
-                if not stopper.aborted:
-                     LOGGER.info(f"Generated Response: {full_response[:200]}..." if len(full_response) > 200 else f"Generated Response: {full_response}")
-                
-            except Exception as e:
-                # Check if it's a queue.Empty error (timeout) from streamer
-                if "Empty" in type(e).__name__:
-                    LOGGER.warning(f"Stream generation timed out. Partial response: {full_response[:100]}...")
-                    yield "\n\n[系统提示: 模型响应超时，生成已终止。]"
-                else:
-                    LOGGER.error(f"Error during stream generation: {e}", exc_info=True)
-                    yield f"[ERROR: {str(e)}]"
-            finally:
-                # Ensure we signal the model thread to stop
-                stopper.abort()
+                except Exception as e:
+                    if "Empty" in type(e).__name__:
+                        LOGGER.warning(f"Stream generation timed out. Partial response: {full_response[:100]}...")
+                        yield "\n\n[系统提示: 模型响应超时，生成已终止。]"
+                    else:
+                        LOGGER.error(f"Error during stream generation: {e}", exc_info=True)
+                        yield f"[ERROR: {str(e)}]"
+                finally:
+                    if stopper:
+                         # cleanup
+                         pass
+                    # Log generation finish
+                    print(f"Backend Stream Finished. Response length: {len(full_response)}")
 
         return StreamingResponse(event_generator(), media_type="text/plain")
 
@@ -181,10 +213,13 @@ async def chat(request: ChatRequest, raw_request: Request):
         LOGGER.error(f"Error processing chat request: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-# Mount Static Files (Frontend)
-frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
-if os.path.exists(frontend_path):
-    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+# [CLEANUP] Standalone Mode: Removed Static File Serving
+# The backend now focuses purely on API services.
+# Frontend should be served separately (e.g. Nginx, Node.js).
+# 
+# frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
+# if os.path.exists(frontend_path):
+#     app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)

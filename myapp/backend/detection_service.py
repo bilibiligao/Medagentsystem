@@ -1,7 +1,10 @@
 import torch
 import json
 import logging
-from config_loader import LOGGER
+# from config_loader import LOGGER
+
+# Use local logger
+LOGGER = logging.getLogger("MedGemma")
 
 class DetectionService:
     def __init__(self, engine):
@@ -57,6 +60,15 @@ class DetectionService:
              )
 
 
+        # Detection prompt construction
+        # Gemma models typically do not support "system" role at the very beginning of standard chat templates in all versions.
+        # But for MedGemma which fine-tunes Gemma, we must follow the specific template.
+        # The error "Conversation roles must alternate user/assistant/user/assistant/..." typically means the template expects user first.
+        # Or it doesn't support 'system' role directly in the messages list for apply_chat_template if the jinja template logic doesn't handle it as a special case.
+        
+        # Strategy: Merge System Prompt into the FIRST User Message.
+        # This is a universal fix for models that complain about role order or lack of system role support.
+        
         detection_prompt_content = [
              {"type": "image", "image": target_image},
              {"type": "text", "text": f"{user_prompt_text}\n\n请分析图像并标注病灶。Provide output in JSON format."}
@@ -83,7 +95,7 @@ class DetectionService:
         gen_args = {
              "max_new_tokens": 8192,
              "temperature": temperature,
-             "do_sample": False # Deterministic for coords
+             "do_sample": False 
         }
         
         try:

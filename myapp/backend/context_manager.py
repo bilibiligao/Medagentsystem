@@ -1,9 +1,52 @@
 import copy
-from config_loader import LOGGER
+# from config_loader import LOGGER
+import logging
+
+LOGGER = logging.getLogger("MedGemma")
 
 class ContextManager:
     def __init__(self, max_token_limit=8192):
         self.max_token_limit = max_token_limit
+
+    def sanitize_history_roles(self, messages):
+        """
+        Merges consecutive messages with the same role to ensure alternating User/Assistant roles.
+        This fixes TemplateErrors in some models (like Gemma) which are strict about role alternation.
+        """
+        if not messages:
+            return []
+            
+        sanitized_messages = []
+        for msg in messages:
+            if not sanitized_messages:
+                sanitized_messages.append(msg)
+            else:
+                last_role = sanitized_messages[-1]['role']
+                current_role = msg['role']
+                
+                if current_role == last_role:
+                    # Merge consecutive messages of the same role
+                    prev_content = sanitized_messages[-1]['content']
+                    curr_content = msg['content']
+                    
+                    # Convert both to LIST format for merging
+                    if isinstance(prev_content, str):
+                        prev_content = [{"type": "text", "text": prev_content}]
+                    if isinstance(curr_content, str):
+                        curr_content = [{"type": "text", "text": curr_content}]
+                    
+                    # Append current content to previous
+                    # Ensure both are lists before adding
+                    if not isinstance(prev_content, list):
+                         prev_content = [{"type": "text", "text": str(prev_content)}]
+                    if not isinstance(curr_content, list):
+                         curr_content = [{"type": "text", "text": str(curr_content)}]
+
+                    sanitized_messages[-1]['content'] = prev_content + curr_content
+                else:
+                    sanitized_messages.append(msg)
+        
+        return sanitized_messages
 
     def manage_context(self, messages, max_limit=None):
         """

@@ -1,14 +1,14 @@
 @echo off
 echo ========================================================
-echo MedGemma Backend Server (Model Only)
+echo MedGemma Backend Server (API Only)
 echo ========================================================
 echo.
 echo Installing backend dependencies...
-pip install -r backend\requirements.txt
+cd backend
+pip install -r requirements.txt
 
 echo.
 echo Starting API Server on Port 8000...
-echo Please ensure port 8000 is allowed in your Firewall.
 echo.
-python start_server.py
+python app.py
 pause

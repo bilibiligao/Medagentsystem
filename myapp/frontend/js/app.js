@@ -27,7 +27,10 @@ createApp({
             topP: 0.9,
             maxTokens: 4096,
             contextWindow: 20000,
-            apiEndpoint: window.location.origin + "/api/chat"
+            // 优先读取注入的全局变量配置，否则回退到 localhost:8000
+            apiEndpoint: (window.MEDGEMMA_CONFIG && window.MEDGEMMA_CONFIG.apiBaseUrl) 
+                         ? (window.MEDGEMMA_CONFIG.apiBaseUrl + "/api/chat") 
+                         : "http://localhost:8000/api/chat"
         };
         
         // Settings - No persistence on reload (as requested)
@@ -127,6 +130,7 @@ createApp({
                 userInput.value = "";
                 pendingImage.value = null;
                 activeFloatingImage.value = null;
+                currentFindings.value = []; // Clear findings
                 return;
             }
 
@@ -136,6 +140,7 @@ createApp({
             userInput.value = ""; // Clear input
             pendingImage.value = null; // Clear pending image
             activeFloatingImage.value = null; // Clear float
+            currentFindings.value = []; // Clear findings
             
             sessions.value.unshift({
                 id: newId,
@@ -157,6 +162,10 @@ createApp({
             const storedMsgs = localStorage.getItem(`medgemma_session_${sessionId}`);
             messages.value = storedMsgs ? JSON.parse(storedMsgs) : [];
             currentSessionId.value = sessionId;
+            
+            // Clear output state
+            activeFloatingImage.value = null;
+            currentFindings.value = [];
             
             // Close sidebar on mobile if open
             if (window.innerWidth < 1024) showHistory.value = false;
@@ -220,6 +229,7 @@ createApp({
             reader.onload = (e) => {
                 pendingImage.value = e.target.result;
                 activeFloatingImage.value = e.target.result; // Auto float newly uploaded image
+                currentFindings.value = []; // [Fix] Clear old bounding boxes when a new image is uploaded
             };
             reader.readAsDataURL(file);
             // Reset input so same file can be selected again if cleared
@@ -227,9 +237,14 @@ createApp({
         };
 
         const setActiveFloatingImage = (imgUrl) => {
-            activeFloatingImage.value = imgUrl;
-            currentFindings.value = []; // Reset findings when image changes
+            if (activeFloatingImage.value !== imgUrl) {
+                // Only clear findings if the image actually changes
+                activeFloatingImage.value = imgUrl;
+                currentFindings.value = []; // Reset findings because they belong to the old image
+            }
         };
+
+
 
         const detectLesions = async () => {
             if (!activeFloatingImage.value || isDetecting.value) return;

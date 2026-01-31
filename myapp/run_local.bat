@@ -1,12 +1,13 @@
 @echo off
 echo ========================================================
-echo MedGemma Local System Launcher
+echo MedGemma Full Stack Launch
 echo ========================================================
 echo.
-echo Installing dependencies (this may take a while first time)...
-pip install -r backend\requirements.txt
+echo 1. Starting Backend Server (New Window)...
+start "MedGemma Backend" cmd /k "run_backend_only.bat"
 
-echo.
-echo Starting Server...
-python start_server.py
-pause
+echo 2. Waiting for backend initialization (5 seconds)...
+timeout /t 5 >nul
+
+echo 3. Starting Frontend Server...
+call run_frontend_only.bat

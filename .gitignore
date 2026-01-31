@@ -17,6 +17,11 @@ __pycache__/
 *.log
 myapp/backend.log
 
+# --- Node.js ---
+node_modules/
+npm-debug.log
+yarn-error.log
+
 # --- IDE Settings (排除编辑器配置) ---
 .vscode/
 .idea/
