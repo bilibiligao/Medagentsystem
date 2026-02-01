@@ -213,13 +213,14 @@ async def chat(request: ChatRequest, raw_request: Request):
         LOGGER.error(f"Error processing chat request: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-# [CLEANUP] Standalone Mode: Removed Static File Serving
-# The backend now focuses purely on API services.
-# Frontend should be served separately (e.g. Nginx, Node.js).
-# 
-# frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
-# if os.path.exists(frontend_path):
-#     app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+# [RESTORED] Standalone Mode: Static File Serving
+# The backend serves the frontend to provide a complete experience on port 8000.
+frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
+if os.path.exists(frontend_path):
+    LOGGER.info(f"Mounting frontend from: {frontend_path}")
+    app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+else:
+    LOGGER.warning(f"Frontend directory not found at {frontend_path}. Serving API only.")
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)

@@ -21,23 +21,17 @@ MedGemma 支持通过系统指令（System Instruction）切换工作模式。
 针对不同的医疗场景，使用特定的“角色设定”和数据结构能大幅提升准确率。
 
 ### 2.1 病灶检测与定位 (Lesion Detection & Localization)
-*用于提取病灶坐标 (Bounding Box) 的原生 Token 序列。*
+*用于提取病灶坐标 (Bounding Box) 的 JSON 数据。*
 
-> **核心更新**: 为了获得最高的坐标精度，建议放弃强制输出 JSON，转而使用 PaliGemma 架构原生的 `<loc>` Token 格式。
-
-*   **角色设定:** `You are an expert AI radiologist.`
-*   **Prompt 策略:**
+*   **角色设定:** `You are an API data generator for a radiology workstation.` (相比 "Doctor" 角色，API Generator 能更严格地遵守 JSON 格式)
+*   **任务描述:** 
     ```text
-    SYSTEM INSTRUCTION: think silently to analyze the image. Detect all findings.
-    
-    REQUIREMENTS:
-    1. Output MUST strictly follow the format: <loc0000><loc0000><loc0000><loc0000> label_description
-    2. Use Simplified Chinese (简体中文) for labels.
-    3. Coordinates are normalized 0-1024 in order [ymin, xmin, ymax, xmax].
-    4. Example: <loc0256><loc0128><loc0512><loc0400> 异常部位名称
+    Your task is to output a raw JSON list of bounding boxes for all pathological findings.
+    Output should be a Valid JSON list of objects.
+    Format: [{"label": "finding name", "box_2d": [ymin, xmin, ymax, xmax], "description": "detailed description"}]
+    Coordinates must be integers 0-100.
     ```
-*   **解析说明:** 后端需通过正则表达式 `re.compile(r"(?:<loc(\d{4})>){4}\s*([^<\n]+)")` 提取结果，并将 0-1024 的坐标映射回前端所需的百分比或像素值。
-
+*   **输入结构:** `[Image, Text: "Locate and describe..."]`
 
 ### 2.2 多切片/3D 分析 (Volumetric Analysis)
 *用于 CT/MRI 连续切片的整体判读。*

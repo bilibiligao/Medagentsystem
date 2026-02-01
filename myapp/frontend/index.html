@@ -326,7 +326,7 @@
                         <img :src="activeFloatingImage" class="w-full h-auto rounded-lg border border-gray-500/50 cursor-zoom-in" @click="previewImage(activeFloatingImage)">
                         
                         <!-- SVG Overlay for Bounding Boxes -->
-                        <svg v-if="currentFindings.length > 0" class="absolute inset-0 w-full h-full pointer-events-none rounded-lg" viewBox="0 0 100 100" preserveAspectRatio="none">
+                        <svg v-if="currentFindings.length > 0" class="absolute inset-0 w-full h-full pointer-events-none rounded-lg" viewBox="0 0 1000 1000" preserveAspectRatio="none">
                             <g v-for="(finding, idx) in currentFindings" :key="idx">
                                 <rect 
                                     :x="finding.box_2d[1]" 
@@ -341,17 +341,17 @@
                                 <!-- Label Background -->
                                 <rect 
                                     :x="finding.box_2d[1]" 
-                                    :y="Math.max(0, finding.box_2d[0] - 8)" 
-                                    width="20" height="8" 
+                                    :y="Math.max(0, finding.box_2d[0] - 80)" 
+                                    width="200" height="80" 
                                     fill="#ef4444" 
                                     opacity="0.8"
                                 />
                                 <!-- Label Text -->
                                 <text 
-                                    :x="finding.box_2d[1] + 1" 
-                                    :y="Math.max(6, finding.box_2d[0] - 2)" 
+                                    :x="finding.box_2d[1] + 10" 
+                                    :y="Math.max(60, finding.box_2d[0] - 20)" 
                                     fill="white" 
-                                    font-size="4"
+                                    font-size="40"
                                     font-weight="bold"
                                     style="text-shadow: 1px 1px 1px rgba(0,0,0,0.5);"
                                 >{{ idx + 1 }}</text>

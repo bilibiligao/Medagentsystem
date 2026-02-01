@@ -52,19 +52,28 @@ MedGemma 4B 模型全精度加载可能需要约 8GB+ 显存。
 - **CORS 配置:** 后端 `app.py` 已经配置了 `CORSMiddleware` 允许跨域请求 (`allow_origins=["*"]`)。
 - **端口检查:** 确保后端服务运行在正确端口（默认 8000），前端请求地址匹配。
 
-## 6. 病灶检测与定位精度 (Lesion Detection Accuracy)
+## 6. 病灶检测 (Lesion Detection)
 
-### [Issue] 检测框偏移或“格点效应” (Coordinate Shift / Quantization Artifacts)
-*   **现象**: 病灶框大致位置正确，但不够贴合病灶边缘，或者总是出现在某些固定的网格位置上。
-*   **原因**: **坐标系与 Token 映射不匹配**。
-    - MedGemma (PaliGemma) 架构本质上将图片分割为 grid，并使用 0-1024 的离散位置 Token (`<loc0000>` - `<loc1024>`) 进行预测。
-    - 如果强迫模型输出 JSON 数字或使用 0-100/0-1000 坐标系，模型被迫进行不精确的数学换算（插值），导致精度损失（Quantization Error）。
+### [Issue] 检测框极小或位置严重偏移
+*   **现象**: SVG 渲染出的红框挤在图片左上角，或完全不对应病灶位置。
+*   **原因**: **坐标系不匹配**。
+    - 模型训练数据使用的是 **0-1000** 的整数坐标系。
+    - 前端误以为是 0-100 或 0-1 坐标系进行渲染。
 *   **解决方案**: 
-    - **Prompt 策略**: 放弃 JSON 输出，改用原生 Token 格式：`<loc Y1><loc X1><loc Y2><loc X2> Label`。
-    - **坐标系**: 必须明确指定 coordinate space 为 **0-1024**。
-    - **后处理**: 在后端解析时，公式需更新为 `Original_Val / 1024 * 100%`。
+    - **后端**: 确保 Prompt 请求 "Integers 0-1000"。
+    - **前端**: 将 SVG 容器的 `viewBox` 设置为 `"0 0 1000 1000"`，从而让 SVG 自动处理缩放，无需手动计算百分比。
 
-### [Issue] 幻觉与偏见 (Hallucinations & Bias)
-*   **现象**: 模型倾向于找出 System Prompt 示例中提到的疾病（如每次都报“胸腔积液”）。
-*   **原因**: Prompt 中的 Few-Shot Example 包含了过于具体的疾病名称。
-*   **解决方案**: 将示例改为完全中性的占位符，如 `label: "异常部位名称"`，切断语义引导。
+### [Issue] 模型输出英文标签 (Language Mismatch)
+*   **现象**: 哪怕用户用中文提问，Detection JSON 中的 `label` 依然是 "Lung Opacity"。
+*   **原因**: 模型的微调数据主要为英文，其内部对医学术语的表示倾向于英文。
+*   **解决方案**: 在 System Prompt 中添加强约束规则："All labels and descriptions MUST be in Simplified Chinese (简体中文)." 并且在 Few-Shot 示例中直接提供中文样本。
+
+## 7. 前端架构 (Frontend Architecture)
+
+### [Issue] 代码维护困难 (Monolithic Codebase)
+*   **现象**: 添加新功能（如设置面板）时，容易破坏原有的对话逻辑；文件过长需要反复滚动。
+*   **原因**: 单体脚本模式 (Monolithic Script) 导致关注点未分离。
+*   **解决方案**: **2026-01-30 完成重构 (ES Modules)**。
+    - 建立 `store.js` 管理全局状态。
+    - 拆分 `api/` 和 `components/` 目录。
+    - 在 `index.html` 中使用 `<script type="module" src="js/main.js"></script>`。

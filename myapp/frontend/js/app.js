@@ -22,15 +22,15 @@ createApp({
 
         const defaultSettings = {
             systemPrompt: "SYSTEM INSTRUCTION: think silently if needed.\n\nYou are MedGemma, a senior AI radiologist and medical consultant.\n\n**Instructions:**\n1. **Image Analysis**: If an image is provided, provide a structured report:\n   - **Findings**: Detailed description of anatomy, textures, and abnormalities.\n   - **Impression**: The likely diagnosis.\n   - **Reasoning**: Explain specific visual evidence.\n\n2. **Medical Consultation**: If NO image is provided, answer medical questions utilizing your professional knowledge. Be accurate, helpful, and evidence-based.\n\n3. **General**: Be concise and professional.",
-            detectionPrompt: "SYSTEM INSTRUCTION: think silently to analyze the image. Detect all findings.\nYou are an expert AI radiologist. \nREQUIREMENTS:\n1. Output MUST strictly follow the format: <loc0000><loc0000><loc0000><loc0000> label_description\n2. Use Simplified Chinese (简体中文) for labels.\n3. Coordinates are normalized 0-1024 in order [ymin, xmin, ymax, xmax].\n4. Example: <loc0256><loc0128><loc0512><loc0400> 异常部位名称\n",
+            detectionPrompt: "SYSTEM INSTRUCTION: think silently to analyze the image structure and anomalies step-by-step. You are an expert AI radiologist. Your task is to output a JSON list of bounding boxes for all visual anomalies.\nREQUIREMENTS:\n1. All labels and descriptions MUST be in Simplified Chinese (简体中文).\n2. Output format: A valid JSON list of objects.\n3. Object Schema: {\"label\": \"visual finding name\", \"box_2d\": [ymin, xmin, ymax, xmax], \"description\": \"detailed visual description\"}\n4. Coordinates: Integers 0-1000 representing relative coordinates. [ymin, xmin, ymax, xmax].\n5. GEOMETRY RULES: ymax must be > ymin. xmax must be > xmin. Do not output zero-width or zero-height boxes.\n6. VERY IMPORTANT: Detection boxes must be TIGHT around the specific anomaly, not covering the whole lung. Focus on visual features (opacities, nodules, lines) rather than jumping to diagnosis.\n7. Example: [{\"label\": \"肺野高密度影\", \"box_2d\": [600, 700, 700, 800], \"description\": \"右下肺野可见局限性高密度影，边缘模糊，密度不均...\"}]",
             temperature: 0.7,
             topP: 0.9,
             maxTokens: 4096,
             contextWindow: 20000,
-            // 优先读取注入的全局变量配置，否则回退到 localhost:8000
+            // 自动适配当前访问的域名/IP (FRP 或 局域网访问友好)
             apiEndpoint: (window.MEDGEMMA_CONFIG && window.MEDGEMMA_CONFIG.apiBaseUrl) 
                          ? (window.MEDGEMMA_CONFIG.apiBaseUrl + "/api/chat") 
-                         : "http://localhost:8000/api/chat"
+                         : (window.location.origin + "/api/chat")
         };
         
         // Settings - No persistence on reload (as requested)
