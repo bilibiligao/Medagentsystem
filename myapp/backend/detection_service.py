@@ -46,21 +46,26 @@ class DetectionService:
         else:
              # MedGemma/PaliGemma native detection format
              # Format: <locYmin><locXmin><locYmax><locXmax> Label
+             # Optimized for maximum coordinate accuracy
              detection_system_prompt = (
                   "SYSTEM INSTRUCTION: think silently to analyze the image. Detect all findings.\n"
                   "You are an expert AI radiologist. \n"
                   "REQUIREMENTS:\n"
-                  "1. Output MUST strictly follow the format: <loc0000><loc0000><loc0000><loc0000> label_description\n"
+                  "1. Output MUST strictly follow the native token format: <loc####><loc####><loc####><loc####> label_description\n"
                   "2. Use Simplified Chinese (简体中文) for labels.\n"
                   "3. Coordinates are normalized 0-1024 in order [ymin, xmin, ymax, xmax].\n"
-                  "4. Example: <loc0256><loc0128><loc0512><loc0400> 异常部位名称\n"
+                  "4. Each <loc####> must be a 4-digit number from 0000 to 1024.\n"
+                  "5. EXAMPLES (with neutral placeholders to avoid bias):\n"
+                  "   <loc0200><loc0150><loc0450><loc0400> 可疑区域A\n"
+                  "   <loc0512><loc0600><loc0768><loc0850> 观察点B\n"
+                  "6. Do NOT use JSON format. Use ONLY the native token format above.\n"
              )
 
 
 
         detection_prompt_content = [
              {"type": "image", "image": target_image},
-             {"type": "text", "text": f"{user_prompt_text}\n\n请分析图像并标注病灶。Provide output in JSON format."}
+             {"type": "text", "text": f"{user_prompt_text}\n\n请仔细分析图像并使用 <loc> token 格式标注所有发现。"}
         ]
         
         formatted_messages = [
@@ -78,13 +83,16 @@ class DetectionService:
         )
         inputs = inputs.to(self.engine.model.device)
         
-        # Generation Params for Detection (Lower temp for JSON stability)
-        # Increased max_new_tokens significantly because the 'thinking' process 
-        # can consume many tokens before the actual JSON output begin
+        # Generation Params for Detection
+        # Optimized for maximum coordinate accuracy:
+        # - temperature=0 ensures greedy decoding (most precise predictions)
+        # - do_sample=False enforces deterministic output
+        # - repetition_penalty prevents coordinate loops
+        # Increased max_new_tokens for 'thinking' process
         gen_args = {
              "max_new_tokens": 8192,
-             "temperature": temperature,
-             "do_sample": False,
+             "temperature": 0.0,  # Greedy decoding for precise coordinates
+             "do_sample": False,  # Deterministic output
              "repetition_penalty": 1.5,  # Higher penalty for detection to prevent coordinate repetition
              "no_repeat_ngram_size": 5   # Prevent exact 5-gram repetition for coordinate sequences
         }
