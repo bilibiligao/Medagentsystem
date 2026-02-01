@@ -84,7 +84,9 @@ class DetectionService:
         gen_args = {
              "max_new_tokens": 8192,
              "temperature": temperature,
-             "do_sample": False 
+             "do_sample": False,
+             "repetition_penalty": 1.5,  # Higher penalty for detection to prevent coordinate repetition
+             "no_repeat_ngram_size": 5   # Prevent exact 5-gram repetition for coordinate sequences
         }
         
         try:

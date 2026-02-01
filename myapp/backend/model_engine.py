@@ -228,7 +228,9 @@ class MedGemmaEngine:
             "max_new_tokens": gen_max_tokens,
             "temperature": gen_temp,
             "top_p": gen_top_p,
-            "do_sample": True
+            "do_sample": True,
+            "repetition_penalty": 1.2,  # Penalize repetitive tokens to prevent coordinate repetition
+            "no_repeat_ngram_size": 3   # Prevent exact 3-gram repetition
         }
 
         # Streaming Logic
