@@ -44,28 +44,34 @@ class DetectionService:
         if custom_system_prompt:
              detection_system_prompt = custom_system_prompt
         else:
-             # MedGemma/PaliGemma native detection format
+             # MedGemma/PaliGemma native detection format with enhanced thinking
              # Format: <locYmin><locXmin><locYmax><locXmax> Label
-             # Optimized for maximum coordinate accuracy
+             # Optimized for maximum coordinate accuracy and detailed reasoning
              detection_system_prompt = (
-                  "SYSTEM INSTRUCTION: think silently to analyze the image. Detect all findings.\n"
-                  "You are an expert AI radiologist. \n"
-                  "REQUIREMENTS:\n"
+                  "SYSTEM INSTRUCTION: think step-by-step to thoroughly analyze the image before detecting findings.\n"
+                  "You are an expert AI radiologist. \n\n"
+                  "ANALYSIS PROCESS (think through these steps):\n"
+                  "1. First, observe the overall image structure and anatomical landmarks\n"
+                  "2. Identify areas that appear abnormal or require attention\n"
+                  "3. For each finding, carefully determine its precise boundaries\n"
+                  "4. Consider the clinical significance and provide accurate descriptions\n\n"
+                  "OUTPUT REQUIREMENTS:\n"
                   "1. Output MUST strictly follow the native token format: <loc####><loc####><loc####><loc####> label_description\n"
-                  "2. Use Simplified Chinese (简体中文) for labels.\n"
+                  "2. Use Simplified Chinese (简体中文) for labels with detailed, clinically meaningful descriptions.\n"
                   "3. Coordinates are normalized 0-1024 in order [ymin, xmin, ymax, xmax].\n"
                   "4. Each <loc####> must be a 4-digit number from 0000 to 1024.\n"
-                  "5. EXAMPLES (with neutral placeholders to avoid bias):\n"
-                  "   <loc0200><loc0150><loc0450><loc0400> 可疑区域A\n"
-                  "   <loc0512><loc0600><loc0768><loc0850> 观察点B\n"
-                  "6. Do NOT use JSON format. Use ONLY the native token format above.\n"
+                  "5. Descriptions should be specific and informative (e.g., include location, size, density characteristics).\n"
+                  "6. EXAMPLES (with neutral placeholders to avoid bias):\n"
+                  "   <loc0200><loc0150><loc0450><loc0400> 右上肺野可疑高密度影，边界清晰\n"
+                  "   <loc0512><loc0600><loc0768><loc0850> 心影左缘观察点，密度略高于周围\n"
+                  "7. Do NOT use JSON format. Use ONLY the native token format above.\n"
              )
 
 
 
         detection_prompt_content = [
              {"type": "image", "image": target_image},
-             {"type": "text", "text": f"{user_prompt_text}\n\n请仔细分析图像并使用 <loc> token 格式标注所有发现。"}
+             {"type": "text", "text": f"{user_prompt_text}\n\n请仔细观察并思考图像的所有细节，然后使用 <loc> token 格式标注所有发现。在标注时，请提供详细、准确的描述。"}
         ]
         
         formatted_messages = [
