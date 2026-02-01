@@ -31,7 +31,7 @@
    ```python
    gen_args = {
        "max_new_tokens": 8192,
-       "temperature": temperature,
+       "temperature": 0.0,             # 贪婪解码，确保坐标精度
        "do_sample": False,
        "repetition_penalty": 1.5,      # 更高的惩罚值（检测任务更关键）
        "no_repeat_ngram_size": 5       # 防止 5-gram 重复（适用于坐标序列）
@@ -41,12 +41,67 @@
 **参数说明:**
 - `repetition_penalty`: 大于 1.0 的值会惩罚已生成的 token，防止循环。推荐范围 1.1-1.5
 - `no_repeat_ngram_size`: 防止精确的 n-gram 序列重复。值越大，约束越强
+- `temperature=0.0`: 贪婪解码，始终选择概率最高的 token，确保坐标预测的精确性和确定性
 - 病灶检测使用更高的惩罚值（1.5 vs 1.2），因为坐标重复问题更严重
 
 **效果 (Results):**
 - 消除了坐标位置的连续重复输出
 - 模型生成更加多样化和准确
 - 保持了输出质量的同时避免了截断问题
+
+---
+
+## 1.1 坐标检测精度优化 (Coordinate Detection Accuracy Optimization)
+
+**补充问题 (Additional Issue):**
+即使解决了重复输出问题，坐标检测的精度仍然可能不够理想，表现为：
+- 检测框位置偏移
+- 坐标不够精确
+- 模型输出不稳定
+
+**深层原因 (Root Causes):**
+1. **提示词冲突**: System Prompt 要求使用 `<loc>` token 格式，但 User Prompt 却要求 "Provide output in JSON format"，造成模型混淆
+2. **采样策略不当**: 使用 `temperature > 0` 会引入随机性，导致坐标预测不稳定
+3. **示例不足**: 原始提示词只有一个示例，且可能引导模型产生偏见
+
+**优化方案 (Optimization Solution):**
+
+1. **统一提示词格式** - 移除冲突指令:
+   ```python
+   # System Prompt - 明确禁止 JSON 格式
+   "6. Do NOT use JSON format. Use ONLY the native token format above.\n"
+   
+   # User Prompt - 改为统一的 token 格式指令
+   "请仔细分析图像并使用 <loc> token 格式标注所有发现。"
+   # (移除了 "Provide output in JSON format")
+   ```
+
+2. **增强示例与约束** - 添加中性占位符防止偏见:
+   ```python
+   "5. EXAMPLES (with neutral placeholders to avoid bias):\n"
+   "   <loc0200><loc0150><loc0450><loc0400> 可疑区域A\n"
+   "   <loc0512><loc0600><loc0768><loc0850> 观察点B\n"
+   ```
+
+3. **强制贪婪解码** - 确保确定性输出:
+   ```python
+   gen_args = {
+       "temperature": 0.0,      # 从可配置的 0.2 改为固定的 0.0
+       "do_sample": False,      # 确保确定性
+   }
+   ```
+
+**技术原理 (Technical Rationale):**
+- **PaliGemma 架构**: MedGemma 基于 PaliGemma，使用 0-1024 的离散 `<loc>` token 进行目标检测
+- **原生格式优势**: 直接输出 token 避免了数值插值和浮点精度损失
+- **贪婪解码**: 在物体检测任务中，确定性比多样性更重要
+- **中性示例**: 防止模型"记忆"特定疾病名称导致的幻觉 (Hallucination)
+
+**综合效果 (Combined Results):**
+- ✅ 消除重复输出
+- ✅ 坐标精度显著提升
+- ✅ 输出结果高度确定和可复现
+- ✅ 减少模型幻觉和偏见
 
 ---
 
