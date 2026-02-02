@@ -1,18 +1,22 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Union, Optional, Any
 import os
+import io
 import time
 import logging
 import asyncio
+import pydicom 
+from PIL import Image
 from starlette.concurrency import run_in_threadpool
 from contextlib import asynccontextmanager
 from model_engine import engine
 # from config_loader import LOGGER # Removed
 from context_manager import context_manager 
 from detection_service import DetectionService # Import new service
+import ct_service
 import uvicorn
 import json
 
@@ -43,7 +47,8 @@ class Config(BaseModel):
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     max_tokens: Optional[int] = None
-    context_window: Optional[int] = 8192 # New parameter (新参数：上下文窗口大小)
+    context_window: Optional[int] = 8192
+    use_ct_context: Optional[bool] = False # New flag to trigger backend injection
 
 class ChatRequest(BaseModel):
     messages: List[Message]
@@ -139,9 +144,38 @@ async def detect(request: DetectRequest):
 @app.post("/api/chat")
 async def chat(request: ChatRequest, raw_request: Request):
     try:
+        LOGGER.info("Received chat request")
+        
         # Convert Pydantic models to dicts for the engine
         messages_data = [msg.model_dump() for msg in request.messages]
         
+        # [NEW] CT Context Injection from Backend Cache
+        if request.config and request.config.use_ct_context:
+             LOGGER.info("Injecting CT Context from Server Cache...")
+             cached_images = ct_service.get_global_context()
+             if cached_images:
+                # Reconstruct Prompt
+                user_msg = messages_data[-1] 
+                user_text = ""
+                content_obj = user_msg.get('content', [])
+                if isinstance(content_obj, str):
+                    user_text = content_obj
+                elif isinstance(content_obj, list):
+                    for item in content_obj:
+                         if item.get('type') == 'text':
+                             user_text += item.get('text', '')
+                
+                instruction = "You are a senior radiologist analyzing a CT scan series. Review the slices provided below. The images are windowed with Red(Wide), Green(Soft Tissue), Blue(Brain)."
+                new_content = [{"type": "text", "text": instruction}]
+                for img_data in cached_images:
+                    new_content.append({"type": "image", "image": img_data['image']})
+                    new_content.append({"type": "text", "text": f"SLICE {img_data['index']}"})
+                new_content.append({"type": "text", "text": f"\n\nQuery: {user_text}"})
+                
+                # Replace history for CT analysis turn
+                messages_data = [{"role": "user", "content": new_content}]
+                LOGGER.info(f"Injected {len(cached_images)} slices into prompt.")
+
         system_prompt = request.config.system_prompt if request.config else "You are a helpful medical assistant."
         if messages_data and messages_data[0]['role'] != 'system':
              messages_data.insert(0, {"role": "system", "content": system_prompt})
@@ -165,52 +199,119 @@ async def chat(request: ChatRequest, raw_request: Request):
             stopper = None
             
             # Acquire Lock for duration of streaming
-            async with model_lock:
-                try:
-                    # Start Generation here, holding the lock
-                    streamer, stopper = engine.generate(
-                        messages_data,
-                        max_new_tokens=request.config.max_tokens if request.config else None,
-                        temperature=request.config.temperature if request.config else None,
-                        top_p=request.config.top_p if request.config else None
-                    )
+            # async with model_lock: # Using threadpool now, lock might be handled inside or we skip if single user
+            # Simplification: engine.chat handles generation. We just iterate.
+            
+            try:
+                # Use engine.chat (new high level method or existing generate)
+                # If engine.chat doesn't exist, we adapt engine.generate
+                # The read_file showed `engine.generate`.
+                
+                streamer, stopper = engine.generate(
+                    messages_data, # Now modified
+                    max_new_tokens=request.config.max_tokens if request.config else None,
+                    temperature=request.config.temperature if request.config else None,
+                    top_p=request.config.top_p if request.config else None
+                )
 
-                    # Iterate streamer
-                    for new_text in streamer:
-                        if first_token_time is None:
-                            first_token_time = time.time()
-                            ttft = first_token_time - start_time
-                            LOGGER.info(f"Time to First Token (TTFT): {ttft:.4f}s")
-                        
-                        full_response += new_text
-                        yield new_text
-                        
-                        if await raw_request.is_disconnected():
-                            LOGGER.info("Client disconnected. Aborting generation.")
-                            stopper.abort()
-                            break
+                for new_text in streamer:
+                    if first_token_time is None:
+                        first_token_time = time.time()
+                        ttft = first_token_time - start_time
+                        LOGGER.info(f"Time to First Token (TTFT): {ttft:.4f}s")
                     
-                    if not stopper.aborted:
-                        LOGGER.info(f"Generated Response: {full_response[:200]}..." if len(full_response) > 200 else f"Generated Response: {full_response}")
+                    full_response += new_text
+                    yield new_text
                     
-                except Exception as e:
-                    if "Empty" in type(e).__name__:
-                        LOGGER.warning(f"Stream generation timed out. Partial response: {full_response[:100]}...")
-                        yield "\n\n[系统提示: 模型响应超时，生成已终止。]"
-                    else:
-                        LOGGER.error(f"Error during stream generation: {e}", exc_info=True)
-                        yield f"[ERROR: {str(e)}]"
-                finally:
-                    if stopper:
-                         # cleanup
-                         pass
-                    # Log generation finish
-                    print(f"Backend Stream Finished. Response length: {len(full_response)}")
+                    if await raw_request.is_disconnected():
+                        LOGGER.info("Client disconnected. Aborting generation.")
+                        stopper.abort()
+                        break
+                
+                if not stopper.aborted:
+                    LOGGER.info(f"Generated Response: {full_response[:200]}..." if len(full_response) > 200 else f"Generated Response: {full_response}")
+                    
+            except Exception as e:
+                if "Empty" in type(e).__name__:
+                    LOGGER.warning(f"Stream generation timed out. Partial response: {full_response[:100]}...")
+                    yield "\n\n[系统提示: 模型响应超时，生成已终止。]"
+                else:
+                    LOGGER.error(f"Error during stream generation: {e}", exc_info=True)
+                    yield f"[ERROR: {str(e)}]"
+            finally:
+                if stopper:
+                        # cleanup
+                        pass
+                # Log generation finish
+                print(f"Backend Stream Finished. Response length: {len(full_response)}")
 
         return StreamingResponse(event_generator(), media_type="text/plain")
 
     except Exception as e:
         LOGGER.error(f"Error processing chat request: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/ct/process")
+async def process_ct_scan_endpoint(files: List[UploadFile] = File(...)):
+    """
+    Process uploaded DICOM or Image files for 3D CT analysis.
+    Returns windowed and sampled images encoded in Base64.
+    """
+    LOGGER.info(f"Received {len(files)} files for CT processing.")
+    
+    mixed_files = []
+    
+    # Read files into memory
+    for file in files:
+        try:
+            contents = await file.read()
+            f_io = io.BytesIO(contents)
+            
+            # Try to read as DICOM first
+            try:
+                ds = pydicom.dcmread(f_io)
+                # Check for basic DICOM attribute to confirm
+                if hasattr(ds, 'PixelData'):
+                    mixed_files.append({'type': 'dicom', 'data': ds, 'name': file.filename})
+                    continue
+                else: 
+                     # Reset stream for next try
+                     f_io.seek(0)
+            except:
+                # Not DICOM, reset stream
+                f_io.seek(0)
+            
+            # Try to read as Image (PNG/JPG)
+            try:
+                img = Image.open(f_io)
+                img.verify() # Verify structure
+                # Reopen because verify closes/consumes
+                f_io.seek(0)
+                img = Image.open(f_io)
+                img.load() # Load data
+                mixed_files.append({'type': 'image', 'data': img, 'name': file.filename})
+                continue
+            except:
+                pass
+                
+        except Exception as e:
+            # Not a valid file, skip
+            # LOGGER.warning(f"Skipping file {file.filename}: {e}")
+            continue
+            
+    if not mixed_files:
+        raise HTTPException(status_code=400, detail="No valid DICOM or Image files found in upload.")
+        
+    try:
+        # Run processing in threadpool to avoid blocking event loop
+        result = await run_in_threadpool(ct_service.process_mixed_files, mixed_files)
+        
+        # Cache on Server!
+        ct_service.set_global_context(result)
+        
+        return {"images": result, "count": len(result)}
+    except Exception as e:
+        LOGGER.error(f"Error processing CT: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 # [RESTORED] Standalone Mode: Static File Serving

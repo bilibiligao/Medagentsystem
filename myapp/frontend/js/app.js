@@ -12,6 +12,14 @@ createApp({
         const sessions = ref([]);
         const currentSessionId = ref(null);
         const showHistory = ref(false); 
+
+        // --- CT Analysis State ---
+        const currentView = ref('chat'); // 'chat' or 'ct'
+        const ctImages = ref([]);
+        const ctMessages = ref([]);
+        const ctInput = ref("");
+        const isProcessingCT = ref(false);
+        const ctChatContainer = ref(null);
         
         // New State for Edit/Float features
         const activeFloatingImage = ref(null);
@@ -68,6 +76,140 @@ createApp({
                      console.error("Reset failed:", e);
                      alert("重置失败，请查看控制台错误。");
                 }
+            }
+        };
+
+        // --- CT Logic ---
+        const switchView = (view) => {
+            currentView.value = view;
+        };
+
+        const processCTUpload = async (event) => {
+            const files = event.target.files;
+            if (!files || files.length === 0) return;
+
+            // Simple validation: check if it looks like a directory or multiple files
+            // Ideally we check extension but DICOM often has no extension
+            
+            isProcessingCT.value = true;
+            ctImages.value = [];
+            ctMessages.value = []; // Reset chat for new scan
+            
+            try {
+                const formData = new FormData();
+                // Append all files
+                for (let i = 0; i < files.length; i++) {
+                    formData.append('files', files[i]);
+                }
+                
+                // Show temporary message
+                ctMessages.value.push({
+                   role: 'assistant',
+                   content: [{type: 'text', text: '正在上传并处理医学影像数据的三维重建与窗位映射，请稍候...'}] 
+                });
+
+                const response = await fetch('/api/ct/process', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errText = await response.text();
+                    throw new Error(errText || "Upload failed");
+                }
+
+                const data = await response.json();
+                ctImages.value = data.images;
+                
+                // Update success message with Action Button
+                ctMessages.value = [{
+                    role: 'assistant',
+                    content: [
+                        { type: 'text', text: `✅ 影像处理完成。\n\n已成功加载并重建 **${data.count}** 张标准切片（512px）。\n\n系统应用了三通道窗位（肺窗/软组织窗/脑窗）。\n\n您可以手动提问，或点击下方按钮开始标准分析：` },
+                        // Custom action payload (rendered by special logic in template or just text hint for now)
+                    ],
+                    // Add a custom property for UI to show buttons
+                    actions: [
+                        { label: '🔍 全面自动分析', query: 'SYSTEM INSTRUCTION: think silently to analyze the image structure and anomalies step-by-step. 请作为一名资深放射科医生，详细分析这组 CT 影像。请按顺序描述：1. 图像质量与窗口设置；2. 主要发现（解剖结构与异常）；3. 诊断意见 (Impression)。' }
+                    ]
+                }];
+                
+            } catch (e) {
+                console.error(e);
+                ctMessages.value.push({
+                    role: 'assistant',
+                    content: [{ type: 'text', text: `❌ 处理失败: ${e.message || "无法解析 DICOM 文件"}` }]
+                });
+            } finally {
+                isProcessingCT.value = false;
+                event.target.value = ''; // Reset input
+            }
+        };
+
+        const sendCTMessage = async (overrideText = null) => {
+            const text = overrideText || ctInput.value;
+            if (!text.trim() || isLoading.value) return;
+            
+            if(!overrideText) ctInput.value = "";
+            isLoading.value = true;
+            
+            // 1. Add User Message to UI (Text only)
+            ctMessages.value.push({ role: 'user', content: [{ type: 'text', text: text }] });
+            
+            // Scroll to bottom
+            nextTick(() => {
+                if(ctChatContainer.value) ctChatContainer.value.scrollTop = ctChatContainer.value.scrollHeight;
+            });
+            
+            try {
+                // 2. Construct Prompt Payload
+                // [OPTIMIZED] Backend-side Injection logic.
+                // We do NOT send images back to the server. We assume server has them cached.
+                
+                const payload = {
+                    messages: [
+                        { role: 'user', content: [{ type: 'text', text: text }] }
+                    ],
+                    config: {
+                        ...settings,
+                        max_tokens: 8092,
+                        temperature: 0.2,
+                        use_ct_context: true // New flag
+                    }
+                };
+                
+                // 3. Init Assistant Message
+                const aiMsg = reactive({ role: 'assistant', content: [{ type: 'text', text: "" }] });
+                ctMessages.value.push(aiMsg);
+                
+                // 4. Send Request
+                const response = await fetch(settings.apiEndpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (!response.ok) throw new Error(response.statusText);
+
+                // 5. Handle Streaming
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    const chunk = decoder.decode(value, { stream: true });
+                    aiMsg.content[0].text += chunk;
+                    nextTick(() => {
+                        if(ctChatContainer.value) ctChatContainer.value.scrollTop = ctChatContainer.value.scrollHeight;
+                    });
+                }
+                
+            } catch (e) {
+                console.error(e);
+                ctMessages.value.push({ role: 'assistant', content: [{ type: 'text', text: "Error: " + e.message }] });
+            } finally {
+                isLoading.value = false;
             }
         };
 
@@ -559,6 +701,15 @@ createApp({
             }
         };
         
+        const getMessageText = (msg) => {
+             if (Array.isArray(msg.content)) {
+                 const textItem = msg.content.find(c => c.type === 'text');
+                 return textItem ? textItem.text : '';
+             }
+             if (typeof msg.content === 'string') return msg.content;
+             return '';
+        };
+
         const previewImage = (url) => {
             previewImageUrl.value = url;
         }
@@ -579,6 +730,7 @@ createApp({
             clearPendingImage,
             sendMessage,
             renderMarkdown,
+            getMessageText, // Added export
             resetSession,
             previewImage,
             sessions,
@@ -588,6 +740,16 @@ createApp({
             deleteMessage: deleteMessage, // Ensure explicit assignment
             deleteSession,
             showHistory,
+            // CT Exports
+            currentView,
+            ctImages,
+            ctMessages,
+            ctInput,
+            isProcessingCT,
+            ctChatContainer,
+            switchView,
+            processCTUpload,
+            sendCTMessage,
             // New exports
             activeFloatingImage,
             setActiveFloatingImage,
