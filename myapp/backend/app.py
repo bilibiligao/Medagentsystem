@@ -165,12 +165,18 @@ async def chat(request: ChatRequest, raw_request: Request):
                          if item.get('type') == 'text':
                              user_text += item.get('text', '')
                 
-                instruction = "You are a senior radiologist analyzing a CT scan series. Review the slices provided below. The images are windowed with Red(Wide), Green(Soft Tissue), Blue(Brain)."
+                instruction = ("You are a senior radiologist analyzing a contiguous block of CT slices. "
+                               "Please review the slices provided below carefully. "
+                               "The images use a specific 3-channel windowing:\n"
+                               "- Red (Wide Window): Range -1024 to 1024 HU (Air to Bone)\n"
+                               "- Green (Soft Tissue Window): Range -135 to 215 HU (Fat to Bone)\n"
+                               "- Blue (Brain Window): Range 0 to 80 HU (Water to Brain)\n"
+                               "Each channel provides different diagnostic information.")
                 new_content = [{"type": "text", "text": instruction}]
                 for img_data in cached_images:
                     new_content.append({"type": "image", "image": img_data['image']})
                     new_content.append({"type": "text", "text": f"SLICE {img_data['index']}"})
-                new_content.append({"type": "text", "text": f"\n\nQuery: {user_text}"})
+                new_content.append({"type": "text", "text": f"\n\nBased on the visual evidence in the slices provided above, answer the following query in Simplified Chinese:\n{user_text}\n\nPlease provide your detailed reasoning."})
                 
                 # Replace history for CT analysis turn
                 messages_data = [{"role": "user", "content": new_content}]

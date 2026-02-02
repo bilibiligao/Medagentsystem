@@ -301,6 +301,14 @@
                            <input type="text" v-model="settings.apiEndpoint" class="w-full bg-gray-700 border border-gray-600 rounded-lg p-3 text-sm focus:border-blue-500 focus:outline-none">
                         </div>
 
+                        <div class="pt-4 border-t border-gray-700">
+                            <h3 class="text-sm font-medium text-red-400 mb-2">危险区域</h3>
+                            <button @click="clearCache" class="w-full bg-red-900/50 hover:bg-red-800 text-red-200 border border-red-800 p-2 rounded-lg text-sm transition flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-trash-can"></i> 重置所有数据
+                            </button>
+                            <p class="text-[10px] text-gray-500 mt-1">清除所有本地缓存、对话历史并重置为初始状态。</p>
+                        </div>
+
                         <button @click="resetSettings" class="w-full py-3 border border-gray-600 text-gray-300 rounded-lg hover:bg-gray-700 transition text-sm flex items-center justify-center">
                             <i class="fa-solid fa-rotate-left mr-2"></i> 恢复默认设置
                         </button>

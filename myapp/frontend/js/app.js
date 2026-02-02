@@ -79,6 +79,19 @@ createApp({
             }
         };
 
+        const clearCache = () => {
+             if (confirm("警告：此操作将删除所有本地存储的数据，包括：\n- 所有历史对话记录\n- 自定义设置\n- 已缓存的状态\n\n您确定要重置应用为全新状态吗？")) {
+                 try {
+                     localStorage.clear();
+                     alert("数据已重置。页面将刷新。");
+                     window.location.reload();
+                 } catch (e) {
+                     console.error("Clear cache failed:", e);
+                     alert("清除缓存失败，请尝试手动清除浏览器数据。");
+                 }
+             }
+        };
+
         // --- CT Logic ---
         const switchView = (view) => {
             currentView.value = view;
@@ -130,7 +143,7 @@ createApp({
                     ],
                     // Add a custom property for UI to show buttons
                     actions: [
-                        { label: '🔍 全面自动分析', query: 'SYSTEM INSTRUCTION: think silently to analyze the image structure and anomalies step-by-step. 请作为一名资深放射科医生，详细分析这组 CT 影像。请按顺序描述：1. 图像质量与窗口设置；2. 主要发现（解剖结构与异常）；3. 诊断意见 (Impression)。' }
+                        { label: '🔍 全面自动分析', query: '详细分析这组 CT 影像。请按顺序以中文描述：1. 图像质量与窗口设置；2. 主要发现（解剖结构与异常）；3. 诊断意见 (Impression)。' }
                     ]
                 }];
                 
@@ -147,10 +160,13 @@ createApp({
         };
 
         const sendCTMessage = async (overrideText = null) => {
-            const text = overrideText || ctInput.value;
-            if (!text.trim() || isLoading.value) return;
+            // Fix: If called from UI event (Enter/Click), overrideText is an Event object.
+            const isOverride = (typeof overrideText === 'string');
+            const text = isOverride ? overrideText : ctInput.value;
+
+            if (!text || typeof text !== 'string' || !text.trim() || isLoading.value) return;
             
-            if(!overrideText) ctInput.value = "";
+            if(!isOverride) ctInput.value = "";
             isLoading.value = true;
             
             // 1. Add User Message to UI (Text only)
@@ -243,8 +259,18 @@ createApp({
         const saveCurrentSession = () => {
             if (!currentSessionId.value) return;
             
-            // Save messages
-            localStorage.setItem(`medgemma_session_${currentSessionId.value}`, JSON.stringify(messages.value));
+            try {
+                // Save messages
+                localStorage.setItem(`medgemma_session_${currentSessionId.value}`, JSON.stringify(messages.value));
+            } catch (e) {
+                if (e.name === 'QuotaExceededError' || e.code === 22) {
+                     console.warn("LocalStorage Quota Exceeded. Failed to save session history.");
+                     // Optional: Notify user or handle gracefully
+                } else {
+                    console.error("Error saving session:", e);
+                }
+                return; // Stop updating metadata if content save failed
+            }
             
             // Update session list metadata
             const sessionIndex = sessions.value.findIndex(s => s.id === currentSessionId.value);
@@ -724,6 +750,7 @@ createApp({
             showSettings,
             settings,
             resetSettings,
+            clearCache,
             chatContainer,
             previewImageUrl,
             handleImageUpload,
