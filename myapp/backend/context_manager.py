@@ -86,7 +86,7 @@ class ContextManager:
             working_messages = messages[:]
 
         # identify preserve candidates (images) and calculate current size
-        # identify preserve candidates (images) and calculate current size (识别需保留的候选对象（图像）并计算当前大小)
+        # (识别需保留的候选对象（图像）并计算当前大小)
         # We'll use a rough heuristic: 1 char ~= 0.3-0.5 tokens. 
         # Let's be conservative: 1 token ~= 4 chars => 1 char = 0.25 tokens. 
         # BUT for Chinese/Multilingual, 1 char might be 0.5-1 token.
