@@ -1,6 +1,6 @@
 # MedGemma 项目功能列表 (Project Features)
 
-本文档列出了 MedGemma 本地化应用目前已完成的主要功能模块及其对应的核心函数/类。
+本文档列出了 MedGemma 本地化应用当前已完成的主要功能模块。
 
 ## 1. 后端核心功能 (Backend Core Features)
 
@@ -9,89 +9,117 @@
 
 *   **对应文件:** `myapp/backend/model_engine.py`
 *   **核心类/函数:**
-    *   `MedGemmaEngine`: 主引擎类。
-    *   `__init__`: 初始化配置，自动检测本地模型路径或 HuggingFace ID。
-    *   `load_model`: 加载模型权重、Tokenzier 和 Processor，处理量化配置 (BitsAndBytes) 和设备映射 (Device Map)。
+    *   `MedGemmaEngine`: 主引擎类（单例模式）。
+    *   `load_model()`: 加载模型权重、Processor，处理量化配置 (BitsAndBytes 4-bit NF4) 和设备映射。
+    *   `generate()`: 格式化消息、应用聊天模板、启动流式生成（TextIteratorStreamer + 后台线程）。
+    *   `AbortStoppingCriteria`: 自定义停止条件，支持客户端中断生成。
 
 ### 1.2 对话接口服务 (Chat Completion Service)
-提供符合 OpenAI 格式风格的 HTTP API，支持多轮对话。
+提供符合 OpenAI 格式风格的 HTTP API，支持多轮对话和流式输出。
 
 *   **对应文件:** `myapp/backend/app.py`
-*   **核心类/函数:**
-    *   `app.post("/chat/completions")` (假设存在，基于常见实践): 处理聊天请求。
-    *   `ChatRequest` (Pydantic Model): 定义请求数据结构。
-    *   `lifespan`: 管理应用生命周期（启动/关闭）。
+*   **核心路由:**
+    *   `POST /api/chat`: 流式聊天完成 (SSE)，支持 CT 上下文注入、系统提示词覆盖、消息修剪。
+    *   `POST /api/detect`: 病灶检测，使用独立 Session 和专用 Prompt。
+    *   `POST /api/ct/process`: 上传 DICOM/图像文件进行 CT 三维重建。
+    *   `GET /api/status`: 健康检查。
+*   **数据模型:** `ChatRequest`、`DetectRequest`、`Message`、`ContentItem`、`Config` (均为 Pydantic Models)。
 
 ### 1.3 多模态上下文管理 (Multimodal Context Management)
 智能管理对话历史，防止 Token 溢出，并确保图像数据不丢失。
 
 *   **对应文件:** `myapp/backend/context_manager.py`
 *   **核心类/函数:**
-    *   `ContextManager`: 上下文管理器类。
-    *   `manage_context(messages, max_limit)`: 执行修剪逻辑。
-        *   保留 System Prompt。
-        *   保留包含 Image 的消息。
-        *   基于近似字符长度修剪旧的纯文本消息。
+    *   `ContextManager`: 上下文管理器类（单例模式）。
+    *   `manage_context(messages, max_limit)`: 基于启发式 Token 估算执行修剪。保留 System Prompt 和含图像的消息，从旧到新移除纯文本消息。
+    *   `sanitize_history_roles()`: 合并连续同角色消息，满足模型严格交替角色要求。
 
-### 1.4 配置管理 (Configuration Management)
-加载和解析应用配置。
+### 1.4 病灶检测服务 (Lesion Detection)
+利用多模态模型实现医学影像病灶定位。
 
-*   **对应文件:** `myapp/backend/config_loader.py`
-*   **核心功能:** 读取配置文件，提供 `CONFIG` 全局对象。
-***注意如果在前端中指定了参数，则会覆盖这一部分参数。
+*   **对应文件:** `myapp/backend/detection_service.py`
+*   **核心类/函数:**
+    *   `DetectionService`: 病灶检测服务类。
+    *   `detect_findings()`: 提取图像和文本、构造检测专用 Prompt（API Generator 角色）、调用模型生成、解析 JSON bounding box、几何校验（零宽高修复、坐标钳位）。
+*   **输出格式:** JSON 列表，每项含 `label`、`box_2d: [ymin, xmin, ymax, xmax]`（0-1000 坐标）、`description`。
 
-## 2. 部署与环境工具 (Deployment tools)
+### 1.5 CT 3D 分析服务 (CT Analysis)
+处理 DICOM 序列并进行三维窗位重建。
 
-### 2.1 自动化环境修复
-*   **对应文件:** `myapp/环境脚本/fix_torch_gpu.bat`
-*   **功能:** 自动卸载 CPU 版 Torch，安装 CUDA 加速版 Torch。
+*   **对应文件:** `myapp/backend/ct_service.py`
+*   **核心函数:**
+    *   `process_mixed_files()`: 主处理管线 — DICOM/图像排序、切片采样（最多 85 张）、HU 转换、三通道窗位、Base64 编码。
+    *   `apply_windowing()`: 三通道伪彩窗位（红: -1024~1024 肺窗, 绿: -135~215 软组织窗, 蓝: 0~80 脑窗）。
+    *   `set_global_context()` / `get_global_context()`: 服务端 CT 缓存管理。
+    *   `norm()`: HU 值归一化到 0-255。
 
-### 2.2 本地服务器启动
-*   **对应文件:** `myapp/backend/app.py`
-*   **功能:** 利用 `uvicorn` 启动 FastAPI 服务。
+## 2. 部署与环境工具 (Deployment Tools)
 
-### 3. 前端功能 (Frontend Features - Node.js Rewrite)
+### 2.1 本地启动
+*   **对应文件:** `myapp/run_backend_only.bat`、`myapp/run_frontend_only.bat`
+*   **功能:** 分别启动后端 (端口 8000) 和前端 (端口 3000)。
 
-本次版本对前端进行了底层架构重写，从纯静态 HTML 升级为 **Node.js + Express** 服务应用。
+### 2.2 环境配置
+*   **对应文件:** `myapp/环境脚本/setup_local_full.bat`、`myapp/环境脚本/fix_torch_gpu.bat`
+*   **功能:** Python 虚拟环境创建、GPU 版 PyTorch 安装、bitsandbytes 配置。
+
+## 3. 前端功能 (Frontend Features)
 
 ### 3.0 服务架构 (Service Architecture)
 *   **对应文件:** `myapp/frontend/server.js`
 *   **核心功能:**
-    *   使用 `express.static` 高效托管静态资源。
-    *   配置反向代理 API 路由 (如有需求) 或直接处理前端路由逻辑。
-    *   为未来引入 WebSocket 实时通信和用户数据库模块打下基础。
+    *   使用 `express.static` 托管静态资源。
+    *   反向代理 `/api/*` 请求到 Python 后端 (端口 8000)。
+    *   动态生成 `env-config.js` 配置。
+    *   请求日志记录（Base64 图像内容截断）。
 
 ### 3.1 核心交互引擎 (Core Interaction Engine)
-*   **架构:** ES Modules 模块化设计 (单体 `app.js` 已弃用)。
-*   **对应文件:** 
-    - `myapp/frontend/js/main.js`: 引导与挂载。
-    - `myapp/frontend/js/api/chat.js`: 负责对话逻辑。
+*   **对应文件:** `myapp/frontend/js/app.js`（单体 Vue 3 应用，~795 行）
 *   **功能:**
-    *   **流式响应 (SSE):** 手动解析 `Fetch API` 的 `ReadableStream`，支持 OpenAI 格式的 Delta Update。
-    *   **异常处理:** 自动过滤 `data: [DONE]` 等非标准 JSON 帧。
-    *   **消息重生成 (Regenerate):** 智能判断重试逻辑，支持移除最后一条错误回复并重试。
+    *   **流式响应:** 手动解析 `Fetch API` 的 `ReadableStream`，实时增量渲染。
+    *   **消息重生成:** 移除最后一条模型回复并重新请求。
+    *   **中断控制:** `AbortController` 支持停止生成。
+    *   **消息编辑/删除:** 悬停显示编辑和删除按钮。
 
-### 3.2 病灶检测与分析 (Lesion Detection)
-*   **对应文件:** `myapp/frontend/js/api/detection.js`
+### 3.2 病灶检测与可视化 (Lesion Detection & Visualization)
+*   **对应文件:** `myapp/frontend/js/app.js`（`detectLesions` 函数）
 *   **功能:**
-    *   **上下文隔离:** 使用独立的 Session 和 System Prompt 发起检测请求，不干扰主对话历史。
-    *   **Prompt 适配:** 内置针对 Gemma 模型的中文 Prompt，强制输出 Simplified Chinese 和 0-1000 相对坐标 JSON。
-    *   **坐标归一化:** 自动验证并清洗后端返回的 Bounding Box 数据。
+    *   **独立检测:** 使用独立 Session 和 System Prompt 发起检测请求，不干扰主对话历史。
+    *   **SVG 标注:** 在 `index.html` 中通过 SVG `<rect>` 覆盖层绘制病灶框，利用 `viewBox="0 0 1000 1000"` 完美映射模型坐标。
+    *   **悬浮影像窗:** 右下角悬浮窗持续显示当前分析影像。
 
-### 3.3 高级渲染与可视化 (Advanced Rendering)
-*   **对应文件:** `myapp/frontend/js/components/renderer.js`
+### 3.3 高级渲染 (Advanced Rendering)
+*   **对应文件:** `myapp/frontend/js/app.js`（`renderMarkdown` 函数）
 *   **功能:**
-    *   **Markdown & CoT:** 自动识别并折叠 `<think>` 标签，渲染推理过程。
-    *   **SVG 标注:** 在 `index.html` 中通过 SVG 覆盖层绘制病灶框，利用 `viewBox="0 0 1000 1000"` 完美映射模型坐标，无需前端计算百分比。
+    *   **Markdown 渲染:** 使用 `marked.js` 渲染模型输出。
+    *   **思考链折叠:** 自动识别 `<unused94>/<unused95>` 标签，转换为可折叠的 `<details>` 思考过程块。
 
-### 3.4 状态管理 (State Management)
-*   **对应文件:** `myapp/frontend/js/store.js`
+### 3.4 会话管理 (Session Management)
+*   **对应文件:** `myapp/frontend/js/app.js`（`loadSessions` / `saveCurrentSession` 等）
 *   **功能:**
-    *   **Store 模式:** 集中管理 `messages`, `settings`, `sessions` 等响应式状态。
-    *   **持久化:** 自动同步会话列表至 `localStorage`。
+    *   **多会话:** 创建、切换、删除多个对话。
+    *   **持久化:** 自动同步会话列表和消息至 `localStorage`。
+    *   **自动标题:** 根据首条用户消息生成对话标题。
 
-### 3.5 图像交互 (Image Interaction)
+### 3.5 设置面板 (Settings Panel)
+*   **对应文件:** `myapp/frontend/js/app.js`（`settings` reactive 对象）
+*   **可配置项:**
+    *   系统提示词 (System Prompt)
+    *   病灶检测提示词 (Detection Prompt)
+    *   温度 (Temperature)、Top-P、最大 Token 数、上下文窗口大小
+    *   API 端点地址
+    *   重置默认设置、清除本地缓存
+
+### 3.6 CT 分析视图 (CT Analysis View)
+*   **对应文件:** `myapp/frontend/js/app.js`（CT 相关状态和函数）
 *   **功能:**
-    *   **悬浮窗 (Floating Window):** 即使在长对话中也能通过右下角悬浮窗随时查看当前“关注”的影像。
-    *   **交互式标注:** 点击检测结果可高亮对应区域。
+    *   目录上传（支持 DICOM 文件夹）。
+    *   切片缩略图网格展示。
+    *   独立 CT 对话界面，后端自动注入缓存切片。
+    *   预设快速分析按钮。
 
+### 3.7 图像交互 (Image Interaction)
+*   **功能:**
+    *   **悬浮窗:** 右下角悬浮窗持续显示当前关注的影像，不受对话滚动影响。
+    *   **图片预览:** 点击图片全屏查看。
+    *   **交互式标注:** 点击检测结果高亮对应区域。

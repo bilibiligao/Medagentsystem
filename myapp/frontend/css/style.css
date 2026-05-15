@@ -18,6 +18,17 @@
   transform: translateX(100%);
 }
 
+.slide-up-enter-active,
+.slide-up-leave-active {
+  transition: all 0.3s ease;
+}
+
+.slide-up-enter-from,
+.slide-up-leave-to {
+  opacity: 0;
+  transform: translateY(20px);
+}
+
 /* Markdown Styles Override */
 .prose ul {
     list-style-type: disc;

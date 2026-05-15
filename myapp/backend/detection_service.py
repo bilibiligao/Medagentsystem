@@ -2,9 +2,7 @@ import torch
 import json
 import logging
 import re
-# from config_loader import LOGGER
 
-# Use local logger
 LOGGER = logging.getLogger("MedGemma")
 
 class DetectionService:
@@ -171,26 +169,15 @@ class DetectionService:
                      for item in temp_findings:
                          box = item.get("box_2d", [])
                          if len(box) == 4:
-                             # 1. Convert to Int and Handle Strings/Floats
-                             try:
-                                 ymin, xmin, ymax, xmax = [int(float(c)) for c in box]
-                             except ValueError:
-                                 continue
-                             
-                             # 1. Convert to Int and Handle Strings/Floats (Model outputs 0-1000)
+                             # Parse coordinates (Model outputs 0-1000 integers or float strings)
                              try:
                                  ymin, xmin, ymax, xmax = [float(c) for c in box]
-                             except ValueError:
+                             except (ValueError, TypeError):
                                  continue
-                             
-                             # 2. Keep as 0-1000 for frontend (viewBox 0 0 1000 1000)
-                             # No normalization needed as prompt asks for 0-1000
-                             
-                             # 3. Fix Geometry (Zero width/height)
-                             if ymax <= ymin: ymax = min(ymin + 10, 1000) # Min 1% height (10 units)
-                             if xmax <= xmin: xmax = min(xmin + 10, 1000) # Min 1% width (10 units)
 
-                             # 4. Clamp to 0-1000
+                             # Fix Geometry (Zero width/height) and Clamp to 0-1000
+                             if ymax <= ymin: ymax = min(ymin + 10, 1000)
+                             if xmax <= xmin: xmax = min(xmin + 10, 1000)
                              ymin = max(0, min(ymin, 1000))
                              xmin = max(0, min(xmin, 1000))
                              ymax = max(0, min(ymax, 1000))

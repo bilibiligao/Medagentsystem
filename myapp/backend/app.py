@@ -1,21 +1,21 @@
 from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Union, Optional, Any
+from typing import List, Union, Optional
 import os
 import io
 import time
 import logging
 import asyncio
-import pydicom 
+import pydicom
 from PIL import Image
 from starlette.concurrency import run_in_threadpool
 from contextlib import asynccontextmanager
 from model_engine import engine
-# from config_loader import LOGGER # Removed
-from context_manager import context_manager 
-from detection_service import DetectionService # Import new service
+from context_manager import context_manager
+from detection_service import DetectionService
 import ct_service
 import uvicorn
 import json
@@ -82,7 +82,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # CORS
-# CORS (跨域资源共享)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -91,12 +90,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Request logging middleware (replaces former Express proxy logging)
+@app.middleware("http")
+async def log_api_requests(request: Request, call_next):
+    if request.url.path.startswith("/api"):
+        body = None
+        try:
+            body = await request.body()
+            log_body = body[:300] if len(body) > 300 else body
+            LOGGER.info(f"{request.method} {request.url.path} | body: {log_body}...")
+        except Exception:
+            LOGGER.info(f"{request.method} {request.url.path}")
+    response = await call_next(request)
+    return response
+
 # API Routes
 @app.get("/api/status")
 async def get_status():
     return {"status": "running", "model_loaded": engine.model is not None}
-
-from fastapi.responses import StreamingResponse
 
 
 class DetectRequest(BaseModel):
@@ -123,7 +134,6 @@ async def detect(request: DetectRequest):
             )
         
         # Try to parse JSON here for safety
-        import json
         findings_data = []
         try:
              findings_data = json.loads(result["findings"])
@@ -320,8 +330,7 @@ async def process_ct_scan_endpoint(files: List[UploadFile] = File(...)):
         LOGGER.error(f"Error processing CT: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
-# [RESTORED] Standalone Mode: Static File Serving
-# The backend serves the frontend to provide a complete experience on port 8000.
+# Serve frontend static files (single-port deployment)
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend")
 if os.path.exists(frontend_path):
     LOGGER.info(f"Mounting frontend from: {frontend_path}")

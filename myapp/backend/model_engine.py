@@ -63,27 +63,8 @@ class MedGemmaEngine:
         device_map = "auto" 
         self.max_memory_mapping = None
 
-        # Logic to force GPU if available, but with CUSTOM SPLIT
-        if torch.cuda.is_available():
-             # Custom Logic: Reserve 1.2GB for System/KV Cache (More aggressive to maximize GPU usage)
-             # We use 'max_memory' argument to tell Accelerate/Transformers not to use more than X GB of VRAM.
-             
-             # total_vram = torch.cuda.get_device_properties(0).total_memory
-             # reserved_vram = 1.2 * 1024 * 1024 * 1024 # 1.2 GB reserved
-             # usable_vram = total_vram - reserved_vram
-             
-             # if usable_vram < 0:
-             #      usable_vram = 0.5 * 1024 * 1024 * 1024 # Fallback minimal 0.5GB
-             
-             # Convert to GiB string for max_memory
-             # usable_vram_gib = f"{usable_vram / (1024**3):.2f}GiB"
-             
-             # LOGGER.info(f"Custom VRAM Management: Total={total_vram/(1024**3):.2f}GiB, Usable={usable_vram_gib} (Reserved 1.2GB)")
-             
-             # We will inject max_memory into model_kwargs
-             # self.max_memory_mapping = {0: usable_vram_gib, "cpu": "32GiB"}
-             pass
-        else:
+        # Use GPU with auto device map if available
+        if not torch.cuda.is_available():
              device_map = "cpu"
              LOGGER.info(f"Using device_map: {device_map}")
 
@@ -156,11 +137,9 @@ class MedGemmaEngine:
                 # Just relies on device_map="auto" to dispatch layers to CPU if GPU is full.
                 
                 self.model = AutoModelForImageTextToText.from_pretrained(self.model_id, **model_kwargs)
-                print("Fallback Model loaded successfully.")
+                LOGGER.info("Fallback Model loaded successfully.")
             else:
                  raise e
-            print(f"Error loading model: {e}")
-            raise e
 
     def process_image(self, image_data):
         if isinstance(image_data, str):
@@ -185,8 +164,8 @@ class MedGemmaEngine:
         # We need to parse incoming messages which might have base64 images
      
 
+
         formatted_messages = []
-        raw_images = []
         
         for msg in messages:
             new_content = []

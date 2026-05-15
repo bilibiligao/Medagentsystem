@@ -2,7 +2,9 @@ import pydicom
 import numpy as np
 import io
 import base64
+import re
 from PIL import Image
+from typing import Union, List
 import logging
 
 try:
@@ -63,29 +65,27 @@ def apply_windowing(ct_slice_pixel_array: np.ndarray) -> np.ndarray:
     rgb_slice = np.stack([red, green, blue], axis=-1)
     return np.round(rgb_slice, 0).astype(np.uint8)
 
-def encode_image(image_array: np.ndarray, format="JPEG") -> str:
-    """Encode numpy array image to base64 string with resize."""
+def encode_image(image: Union[np.ndarray, Image.Image], format="JPEG") -> str:
+    """Encode numpy array or PIL Image to base64 string with resize."""
+    if isinstance(image, np.ndarray):
+        img = Image.fromarray(image)
+    else:
+        img = image
+        if img.mode != "RGB":
+            img = img.convert("RGB")
     with io.BytesIO() as img_bytes:
-        # Convert numpy array to PIL Image
-        img = Image.fromarray(image_array)
-        # Resize to max 512x512 to save bandwidth and VRAM (MedGemma inputs are typically processed)
         img.thumbnail((512, 512))
         img.save(img_bytes, format=format, quality=85)
         img_bytes.seek(0)
         encoded_string = base64.b64encode(img_bytes.getbuffer()).decode("utf-8")
     return f"data:image/{format.lower()};base64,{encoded_string}"
 
-def encode_pil_image(img: Image.Image, format="JPEG") -> str:
-    """Encode PIL Image to base64 string with resize."""
-    with io.BytesIO() as img_bytes:
-        if img.mode != "RGB":
-             img = img.convert("RGB")
-        # Resize
-        img.thumbnail((512, 512))
-        img.save(img_bytes, format=format, quality=85)
-        img_bytes.seek(0)
-        encoded_string = base64.b64encode(img_bytes.getbuffer()).decode("utf-8")
-    return f"data:image/{format.lower()};base64,{encoded_string}"
+def _sample_items(items: List, max_slices: int = 85) -> List:
+    """Sample items evenly if count exceeds max_slices."""
+    if len(items) > max_slices:
+        indices = [int(round(i / max_slices * (len(items) - 1))) for i in range(1, max_slices + 1)]
+        return [items[i] for i in indices]
+    return items
 
 def process_mixed_files(files_data):
     """
@@ -119,15 +119,8 @@ def process_mixed_files(files_data):
                 return 0
             
             sorted_items = sorted(dicom_items, key=get_dicom_sort_key)
-            
-            # 2. Sample
-            max_slices = 85
-            if len(sorted_items) > max_slices:
-                indices = [int(round(i / max_slices * (len(sorted_items) - 1))) for i in range(1, max_slices + 1)]
-                sampled_items = [sorted_items[i] for i in indices]
-            else:
-                sampled_items = sorted_items
-                
+            sampled_items = _sample_items(sorted_items)
+
             # 3. Window & Encode
             for idx, item in enumerate(sampled_items):
                 try:
@@ -164,26 +157,17 @@ def process_mixed_files(files_data):
                     
         elif len(image_items) > 0:
             # Process Images (PNG/JPG)
-            # 1. Natural Sort Helper
-            import re
             def natural_keys(text):
                 return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', text)]
-                
+
             sorted_items = sorted(image_items, key=lambda x: natural_keys(x['name']))
-            
-            # 2. Sample
-            max_slices = 85
-            if len(sorted_items) > max_slices:
-                indices = [int(round(i / max_slices * (len(sorted_items) - 1))) for i in range(1, max_slices + 1)]
-                sampled_items = [sorted_items[i] for i in indices]
-            else:
-                sampled_items = sorted_items
-                
+            sampled_items = _sample_items(sorted_items)
+
             # 3. Encode (No Windowing possible)
             for idx, item in enumerate(sampled_items):
                 try:
                     img = item['data']
-                    b64_img = encode_pil_image(img)
+                    b64_img = encode_image(img)
                     
                     processed_images.append({
                         "index": idx + 1,
@@ -200,9 +184,4 @@ def process_mixed_files(files_data):
         LOGGER.error(f"Error in process_mixed_files: {str(e)}")
         raise e
 
-def process_dicom_files(valid_dicom_datasets):
-    # Backward compatibility wrapper or deprecated
-    # wrapping into new structure
-    data = [{'type': 'dicom', 'data': ds, 'name': ''} for ds in valid_dicom_datasets]
-    return process_mixed_files(data)
 
